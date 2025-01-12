@@ -1,7 +1,13 @@
+import Dashboard from "./components/Dashboard";
 import MedicineForm from "./components/medicineForm";
 
 function App() {
-  return <MedicineForm />;
+  return (
+    <div>
+      <MedicineForm />
+      <Dashboard />
+    </div>
+  );
 }
 
 export default App;

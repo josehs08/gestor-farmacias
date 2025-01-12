@@ -29,7 +29,7 @@ const MedicineForm = () => {
   };
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form onSubmit={handleSubmit} className='flex justify-center p-4 border'>
       <div>
         <label htmlFor='file'>Upload PDF:</label>
         <input
