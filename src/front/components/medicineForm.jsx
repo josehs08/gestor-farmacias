@@ -1,12 +1,46 @@
+import React, { useState } from "react";
+
 const MedicineForm = () => {
+  const [file, setFile] = useState(null);
+
+  const handleFileChange = (event) => {
+    setFile(event.target.files[0]);
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const formData = new FormData();
+    formData.append("file", file);
+    console.log(formData.file);
+
+    try {
+      const response = await fetch("http://127.0.0.1:5000/factura", {
+        method: "POST",
+        body: formData,
+      });
+      if (response.ok) {
+        alert("File uploaded successfully");
+      } else {
+        alert("Error uploading file");
+      }
+    } catch (error) {
+      alert("Error uploading file");
+    }
+  };
+
   return (
-    <div className='border p-4'>
-      <h1>Medicine Form</h1>
-      <form>
-        <input type='file' id='file' name='file' />
-        <button type='submit'>Submit</button>
-      </form>
-    </div>
+    <form onSubmit={handleSubmit}>
+      <div>
+        <label htmlFor='file'>Upload PDF:</label>
+        <input
+          type='file'
+          id='file'
+          accept='application/pdf'
+          onChange={handleFileChange}
+        />
+      </div>
+      <button type='submit'>Submit</button>
+    </form>
   );
 };
 
