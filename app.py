@@ -1,15 +1,28 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
-from src.back.models import Recipe, SessionLocal, Base, engine
 from io import BytesIO
 import os
 
 app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///project.db"
+db = SQLAlchemy()
+db.init_app(app)
 CORS(app)
 
-# Crear todas las tablas
-Base.metadata.create_all(bind=engine)
+
+
+class Recipe(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, nullable=False)
+    file = db.Column(db.LargeBinary, nullable=False)
+
+    def serialize(self):
+        return {
+            'id': self.id,
+            'name': self.name
+        }
 
 @app.route("/")
 def hello_world():
@@ -17,24 +30,28 @@ def hello_world():
 
 @app.route("/factura", methods=['POST'])
 def factura():
-    session = SessionLocal()
     file = request.files['file']
     name = datetime.now().strftime('%Y%m%d') + ".pdf"
     recipe = Recipe(name=name, file=file.read())
     try:
-        session.add(recipe)
-        session.commit()
+        db.add(recipe)
+        db.commit()
         return jsonify({'id': recipe.id, 'name': recipe.name})
     except Exception as e:
-        session.rollback()
+        db.rollback()
         return jsonify({'error': str(e)})
     finally:
-        session.close()
+        db.close()
+
+@app.route('/facturas', methods=['GET'])
+def facturas():
+    facturas = Recipe.query.all()
+    data = list(map(lambda x: x.serialize(), facturas))
+    return jsonify(data)
 
 @app.route('/download/<upload_id>')
 def download(upload_id):
-    session = SessionLocal()
-    upload = session.query(Recipe).filter_by(id=upload_id).first()
+    upload = db.query(Recipe).filter_by(id=upload_id).first()
     return send_file(BytesIO(upload.file), 
                      download_name=upload.name, as_attachment=True)
 

@@ -11,11 +11,12 @@ const MedicineForm = () => {
     event.preventDefault();
     const formData = new FormData();
     formData.append("file", file);
-    console.log(formData.file);
-
     try {
       const response = await fetch("http://127.0.0.1:5000/factura", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/pdf",
+        },
         body: formData,
       });
       if (response.ok) {
