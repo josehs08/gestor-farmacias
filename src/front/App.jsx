@@ -1,11 +1,11 @@
-import Dashboard from "./components/Dashboard";
 import MedicineForm from "./components/medicineForm";
+import RecipeList from "./components/RecipeList.jsx";
 
 function App() {
   return (
     <div>
       <MedicineForm />
-      <Dashboard />
+      <RecipeList />
     </div>
   );
 }

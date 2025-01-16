@@ -12,35 +12,31 @@ const MedicineForm = () => {
     const formData = new FormData();
     formData.append("file", file);
     try {
-      const response = await fetch("http://127.0.0.1:5000/factura", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/pdf",
-        },
-        body: formData,
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_APP_API_URL}/factura`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
       if (response.ok) {
         alert("File uploaded successfully");
       } else {
         alert("Error uploading file");
       }
     } catch (error) {
+      console.log(error);
       alert("Error uploading file");
     }
   };
 
   return (
     <form onSubmit={handleSubmit} className='flex justify-center p-4 border'>
-      <div>
-        <label htmlFor='file'>Upload PDF:</label>
-        <input
-          type='file'
-          id='file'
-          accept='application/pdf'
-          onChange={handleFileChange}
-        />
+      <div className='flex flex-col border p-4'>
+        <label htmlFor='file'>Introduce tu factura:</label>
+        <input name='file' type='file' id='file' onChange={handleFileChange} />
+        <button type='submit'>Submit</button>
       </div>
-      <button type='submit'>Submit</button>
     </form>
   );
 };
