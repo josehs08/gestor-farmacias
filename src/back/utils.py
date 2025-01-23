@@ -10,25 +10,31 @@ def extract_text_from_pdf(file):
         text += page.extract_text()
     return text
 
-class Medicina:
-    def __init__(self, cantidad, codigo, descripcion, lote, precio_bs, precio_usd, total_bs, total_usd):
-        self.cantidad = cantidad
-        self.codigo = codigo
-        self.descripcion = descripcion
-        self.lote = lote
-        self.precio_bs = precio_bs
-        self.precio_usd = precio_usd
-        self.total_bs = total_bs
-        self.total_usd = total_usd
-        
-def extract_invoice_data(text):
-    factura_pattern = re.compile(r'Factura N°: (\d+)')
-    fecha_pattern = re.compile(r'Fecha: (\d{2}-\d{2}-\d{4})')
-    medicina_pattern = re.compile(r'(\d+)\s+(\w+)\s+([\w\s\.,-]+)\s+\(E\)\s+\d+\s+[\d/]+\s+[\d.]+\s+([\d.]+)\s+[\d.]+\s+[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)')
-    factura_num = factura_pattern.search(text).group(1)
-    fecha = fecha_pattern.search(text).group(1)
-    medicinas = []
-    for match in medicina_pattern.findall(text):
-        cantidad, codigo, descripcion, precio_bs, precio_usd, total_bs, total_usd = match
-        medicinas.append(Medicina(cantidad, codigo, descripcion, '', precio_bs, precio_usd, total_bs, total_usd))
-    return factura_num, fecha, medicinas
+def extraer_datos(texto):
+    patron = r"^(\d)\s(\w+)\s(.*?)\s(\d)\s(\w+)\s.\s(\d+.\d+)\s(\d+.\d+)\s([\w,]+.\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s([\w,]+.\d+)\s(\d+.\d+)\s([\w,]+.\d+)\s(\d+.\d+)"
+    coincidencias = re.finditer(patron, texto, re.MULTILINE)
+    medicamentos = []
+
+    for coincidencia in coincidencias:
+        medicamento = {
+            "cantidad": coincidencia.group(1),
+            "codigo": coincidencia.group(2),
+            "descripcion": coincidencia.group(3),
+            "bulto": coincidencia.group(4),
+            "lote": coincidencia.group(5),
+            "exp": coincidencia.group(6),
+            "ALIC": coincidencia.group(7),
+            "PRECIO_BS":coincidencia.group(8),
+            "DC":coincidencia.group(9),
+            "DD": coincidencia.group(10),
+            "DL": coincidencia.group(11),
+            "DV": coincidencia.group(12),
+            "Neto Bs": coincidencia.group(13),
+            "Neto USD": coincidencia.group(14),
+            "TOT. NETO Bs": coincidencia.group(15),
+            "TOT. NETO USD": coincidencia.group(16),
+        }
+        medicamentos.append(medicamento)
+
+
+    return medicamentos

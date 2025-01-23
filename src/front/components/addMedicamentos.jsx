@@ -6,10 +6,7 @@ const AddMedicamentos = ({ uploadId }) => {
   const handleAddMedicamentos = async () => {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_APP_API_URL}/factura/medicamentos/${uploadId}`,
-        {
-          method: "POST",
-        }
+        `${import.meta.env.VITE_APP_API_URL}/medicina/${uploadId}`
       );
       const data = await response.json();
       if (response.ok) {

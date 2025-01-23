@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import AddMedicamentos from "./AddMedicamentos";
+import AddMedicamentos from "./addMedicamentos.jsx";
 
 const RecipeList = () => {
   const [facturas, setFacturas] = useState([]);
