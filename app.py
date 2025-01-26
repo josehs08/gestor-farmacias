@@ -40,6 +40,7 @@ class Medicina(db.Model):
     Neto_USD = db.Column(db.String, nullable=False)
     TOT_NETO_Bs = db.Column(db.String, nullable=False)
     TOT_NETO_USD = db.Column(db.String, nullable=False)
+    id_factura = db.Column(db.Integer, db.ForeignKey('factura.id'))
 
     def serialize(self):
         return {
@@ -62,6 +63,12 @@ class Medicina(db.Model):
             'TOT_NETO_USD': self.TOT_NETO_USD
         }
         
+class Factura(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    numero = db.Column(db.String, nullable=False)
+    fecha = db.Column(db.String, nullable=False)
+    precio_dolar = db.Column(db.String, nullable=False)
+    
 with app.app_context():
     db.create_all()
     db.session.commit()
