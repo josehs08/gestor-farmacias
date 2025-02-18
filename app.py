@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from io import BytesIO
 import os
-from src.back.utils import extract_text_from_pdf, extraer_datos
+from src.back.utils import extraer_datos_factura_pdf, extraer_informacion_medicamentos
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///project.db"
@@ -106,7 +106,7 @@ def download_txt(upload_id):
     if not upload:
         return jsonify({'error': 'File not found'}), 404
     pdf_content = BytesIO(upload.file)
-    txt_content = extract_text_from_pdf(pdf_content)
+    txt_content = extraer_datos_factura_pdf(pdf_content)
     return send_file(BytesIO(txt_content.encode('utf-8')), download_name=upload.name.replace('.pdf', '.txt'), as_attachment=True)
 
 @app.route("/medicina")
@@ -114,42 +114,6 @@ def medicina():
     medicinas = Medicina.query.all()
     response = list(map(lambda x: x.serialize(), medicinas))
     return jsonify(response)
-
-@app.route("/medicina/<upload_id>")
-def medicina_upload(upload_id):
-    upload = Recipe.query.filter_by(id=upload_id).first()
-    if not upload:
-        return jsonify({'error': 'File not found'}), 404
-    pdf_content = BytesIO(upload.file)
-    txt_content = extract_text_from_pdf(pdf_content)
-    medicines = extraer_datos(txt_content)
-    print(medicines)
-    for medicine in medicines:
-        med = Medicina(
-            cantidad=medicine['cantidad'],
-            codigo=medicine['codigo'],
-            descripcion=medicine['descripcion'],
-            bulto=medicine['bulto'],
-            lote=medicine['lote'],
-            exp=medicine['exp'],
-            ALIC=medicine['ALIC'],
-            PRECIO_BS=medicine['PRECIO_BS'],
-            DC=medicine['DC'],
-            DD=medicine['DD'],
-            DL=medicine['DL'],
-            DV=medicine['DV'],
-            Neto_Bs=medicine['Neto Bs'],
-            Neto_USD=medicine['Neto USD'],
-            TOT_NETO_Bs=medicine['TOT. NETO Bs'],
-            TOT_NETO_USD=medicine['TOT. NETO USD']
-        )
-        db.session.add(med)
-    try:
-        db.session.commit()
-        return jsonify({'message': medicines})
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': str(e)})
 
 
 
