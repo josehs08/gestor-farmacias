@@ -8,8 +8,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { DescargarExcel } from "./descargarExcel";
 
-const MedicamentoLista = () => {
+const ListaMedicamentos = () => {
   const [medicamentos, setMedicamentos] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -40,13 +42,15 @@ const MedicamentoLista = () => {
   return (
     <div className='container mx-auto p-4'>
       <h1 className='text-2xl font-bold mb-4'>Lista medicamentos</h1>
-      <input
-        type='text'
-        placeholder='Buscar por descripción'
-        value={searchTerm}
-        onChange={handleSearch}
-        className='mb-4 p-2 border border-gray-300 rounded'
-      />
+      <div className='flex justify-between items-center gap-4'>
+        <Input
+          type='text'
+          placeholder='Buscar por descripción'
+          value={searchTerm}
+          onChange={handleSearch}
+        />
+        <DescargarExcel tipo='medicinas' />
+      </div>
       <div>
         <Table>
           <TableHeader>
@@ -93,4 +97,4 @@ const MedicamentoLista = () => {
   );
 };
 
-export default MedicamentoLista;
+export default ListaMedicamentos;

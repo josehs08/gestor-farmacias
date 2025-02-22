@@ -2,25 +2,30 @@ import PyPDF2
 import os
 import re
 from datetime import datetime
+from io import BytesIO
 
 def extraer_datos_factura_pdf(file):
     reader = PyPDF2.PdfReader(file)
-    facturas = []
-    for page_num in range(len(reader.pages)):
-        page = reader.pages[page_num]
-        texto = page.extract_text()
-        numero_factura = re.search(r"Factura N°: (\d+)", texto)
-        fecha = re.search(r"Fecha: (\d+-\d+-\d+)", texto)
-        tipo_de_cambio = re.search(r"Tipo de Cambio \(USA \$\) Bs\. (\d+(\.\d+)?)", texto)
-        factura = {
-            "name": datetime.now().strftime('%Y%m%d') + ".pdf",
-            "texto": texto,
-            "numero_factura": numero_factura.group(1) if numero_factura else None,
-            "fecha": fecha.group(1) if fecha else None,
-            "tipo_de_cambio":tipo_de_cambio.group(1) if tipo_de_cambio else None
-        }
-        facturas.append(factura)
-    return facturas
+    if len(reader.pages) == 0:
+        return None
+    
+    page = reader.pages[0]
+    texto = page.extract_text()
+    numero_factura = re.search(r"Número de Documento: (\d+)", texto)
+    fecha = re.search(r"Fecha de Emisión: (\d{2}-\d{2}-\d{4})", texto)
+    tipo_de_cambio = re.search(r"Tipo de Cambio \(USA \$\) Bs\. (\d+(\.\d+)?)", texto)
+
+    factura = {
+        "name": datetime.now().strftime('%Y%m%d') + ".pdf",
+        "texto": texto,
+        "numero_factura": numero_factura.group(1) if numero_factura else None,
+        "fecha": fecha.group(1) if fecha else None,
+        "tipo_de_cambio": tipo_de_cambio.group(1) if tipo_de_cambio else None,
+        "file": file
+    }
+
+    print(factura)
+    return factura
 
 def extraer_informacion_medicamentos(texto):
     patron = r"^(\d)\s(\w+)\s(.*?)\s(\d)\s(\w+)\s.\s(\d+.\d+)\s(\d+.\d+)\s([\w,]+.\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s([\w,]+.\d+)\s(\d+.\d+)\s([\w,]+.\d+)\s(\d+.\d+)"
@@ -48,3 +53,9 @@ def extraer_informacion_medicamentos(texto):
         }
         medicamentos.append(medicamento)
     return medicamentos
+
+def extraer_texto_pdf(file_data):
+    """Convierte los bytes del PDF en texto."""
+    pdf_reader = PyPDF2.PdfReader(BytesIO(file_data))
+    extracted_text = "\n".join([page.extract_text() for page in pdf_reader.pages if page.extract_text()])
+    return extracted_text

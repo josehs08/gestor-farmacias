@@ -1,12 +1,16 @@
 import React, { useState } from "react";
+import { Button } from "../../components/ui/button";
 
-const AddMedicamentos = ({ uploadId }) => {
+const AgregarMedicamentos = ({ uploadId }) => {
   const [message, setMessage] = useState("");
 
   const handleAddMedicamentos = async () => {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_APP_API_URL}/medicina/${uploadId}`
+        `${import.meta.env.VITE_APP_API_URL}/medicina/${uploadId}`,
+        {
+          method: "POST",
+        }
       );
       const data = await response.json();
       if (response.ok) {
@@ -21,10 +25,10 @@ const AddMedicamentos = ({ uploadId }) => {
 
   return (
     <div>
-      <button onClick={handleAddMedicamentos}>Add Medications</button>
+      <Button onClick={handleAddMedicamentos}>Agregar</Button>
       {message && <p>{message}</p>}
     </div>
   );
 };
 
-export default AddMedicamentos;
+export default AgregarMedicamentos;
