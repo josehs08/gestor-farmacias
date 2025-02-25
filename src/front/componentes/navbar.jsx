@@ -10,6 +10,7 @@ const Navbar = () => {
         <Link to='/'>Inicio</Link>
         <Link to='/medicamentos'>Medicamentos</Link>
         <Link to='/facturas'>Facturas</Link>
+        <Link to='/precios'>Precios</Link>
         <ThemeProvider defaultTheme='light' storageKey='vite-ui-theme'>
           <ModeToggle />
         </ThemeProvider>

@@ -39,22 +39,22 @@ class Recipe(db.Model):
     
 class Medicina(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    cantidad = db.Column(db.Integer, nullable=False)
-    codigo = db.Column(db.String, nullable=False)
-    descripcion = db.Column(db.String, nullable=False)
-    bulto = db.Column(db.Integer, nullable=False)
-    lote = db.Column(db.String, nullable=False)
-    exp = db.Column(db.String, nullable=False)
-    ALIC = db.Column(db.String, nullable=False)
-    PRECIO_BS = db.Column(db.String, nullable=False)
-    DC = db.Column(db.Integer, nullable=False)
-    DD = db.Column(db.Integer, nullable=False)
-    DL = db.Column(db.Integer, nullable=False)
-    DV = db.Column(db.Integer, nullable=False)
-    Neto_Bs = db.Column(db.String, nullable=False)
-    Neto_USD = db.Column(db.String, nullable=False)
-    TOT_NETO_Bs = db.Column(db.String, nullable=False)
-    TOT_NETO_USD = db.Column(db.String, nullable=False)
+    cantidad = db.Column(db.Integer, nullable=True)
+    codigo = db.Column(db.String, nullable=True)
+    descripcion = db.Column(db.String, nullable=True)
+    bulto = db.Column(db.Integer, nullable=True)
+    lote = db.Column(db.String, nullable=True)
+    exp = db.Column(db.String, nullable=True)
+    ALIC = db.Column(db.String, nullable=True)
+    PRECIO_BS = db.Column(db.Float, nullable=True)
+    DC = db.Column(db.Integer, nullable=True)
+    DD = db.Column(db.Integer, nullable=True)
+    DL = db.Column(db.Integer, nullable=True)
+    DV = db.Column(db.Integer, nullable=True)
+    Neto_Bs = db.Column(db.Float, nullable=True)
+    Neto_USD = db.Column(db.Float, nullable=True)
+    TOT_NETO_Bs = db.Column(db.Float, nullable=True)
+    TOT_NETO_USD = db.Column(db.Float, nullable=True)
 
     def serialize(self):
         return {
@@ -95,23 +95,15 @@ def facturas():
     data = list(map(lambda x: x.serialize(), facturas))
     return jsonify(data)
 
-from flask import Flask, request, jsonify
-
 @app.route("/factura", methods=['POST'])
 def factura():
-    data = request.json
-    if not data or 'url' not in data:
-        return jsonify({'error': 'No URL provided'}), 400
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
 
-    pdf_url = data['url']
-    try:
-        response = requests.get(pdf_url)
-        response.raise_for_status()
-        file_binary = response.content
-    except requests.exceptions.RequestException as e:
-        return jsonify({'error': f'Error downloading file: {str(e)}'}), 400
-    
-    file_stream = BytesIO(file_binary)
+    file_stream = BytesIO(file.read())
     extracted_data = extraer_datos_factura_pdf(file_stream)
 
     if not extracted_data:
@@ -128,7 +120,7 @@ def factura():
         fecha=fecha,
         tipo_de_cambio=tipo_de_cambio,
         texto=texto,
-        file=file_binary  # Guardar el archivo en binario
+        file=file.read()  # Guardar el archivo en binario
     )
 
     try:
@@ -158,9 +150,9 @@ def addMedicina(idFactura):
     data = Recipe.query.filter_by(id=idFactura).first()
     if not data:
         return jsonify({'error': 'Factura not found'}), 404
-    texto = extraer_texto_pdf(data.file)
-    medicinas = extraer_informacion_medicamentos(texto)
+    medicinas = extraer_informacion_medicamentos(data.texto)
     for medicina in medicinas:
+        print(medicina)
         medicina = Medicina(
             cantidad=medicina.get('cantidad'),
             codigo=medicina.get('codigo'),
@@ -237,12 +229,10 @@ def procesar_pdf():
         return jsonify({"error": "No se proporcionó una URL"}), 400
 
     try:
-        # Descargar el PDF desde la URL
         response = requests.get(pdf_url)
         if response.status_code != 200:
             return jsonify({"error": "No se pudo descargar el PDF"}), 400
 
-        # Guardar el PDF temporalmente (opcional)
         file_path = f"/tmp/pdf_procesado.pdf"
         with open(file_path, "wb") as f:
             f.write(response.content)
@@ -251,6 +241,13 @@ def procesar_pdf():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+@app.route('/precio/<nombre>', methods=['GET'])
+def precio(nombre):
+    data = Medicina.query.filter(Medicina.descripcion.like(f"%{nombre}%")).all()
+    if not data:
+        return jsonify({'error': 'Medicina not found'}), 404
+    return jsonify({"precios": [{"descripcion": med.descripcion, "precio": med.PRECIO_BS} for med in data]})
 
 if __name__ == '__main__':
     app.run(debug=True)

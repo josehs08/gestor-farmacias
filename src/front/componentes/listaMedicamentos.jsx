@@ -35,10 +35,6 @@ const ListaMedicamentos = () => {
     setSearchTerm(event.target.value);
   };
 
-  const filteredMedicamentos = medicamentos.filter((medicamento) =>
-    medicamento.descripcion.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
   return (
     <div className='container mx-auto p-4'>
       <h1 className='text-2xl font-bold mb-4'>Lista medicamentos</h1>
@@ -72,7 +68,7 @@ const ListaMedicamentos = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredMedicamentos.map((medicamento) => (
+            {medicamentos.map((medicamento) => (
               <TableRow key={medicamento.id}>
                 <TableCell>{medicamento.cantidad}</TableCell>
                 <TableCell>{medicamento.codigo}</TableCell>
