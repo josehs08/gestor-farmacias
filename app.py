@@ -1,13 +1,19 @@
-from flask import Flask, request, jsonify, send_file, after_this_request, Response
+from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from io import BytesIO
 import hmac
 import os
-import tempfile
-from src.back.utils import extraer_datos_factura_pdf, extraer_informacion_medicamentos, validar_url_publica
+import secrets
+from src.back.utils import (
+    detectar_formato,
+    extraer_datos_factura_pdf,
+    extraer_informacion_medicamentos,
+    validar_url_publica,
+)
 from flask_admin import Admin, AdminIndexView
 from flask_admin.contrib.sqla import ModelView
+from flask_admin.form import SecureForm
 from dotenv import load_dotenv
 import pandas as pd
 import requests
@@ -17,7 +23,11 @@ load_dotenv()
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///database.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('FLASK_KEY')
+# Sin FLASK_KEY se usa una clave aleatoria por proceso: las sesiones del
+# panel admin se invalidan al reiniciar, pero nunca se firma con una clave vacía.
+app.config['SECRET_KEY'] = os.getenv('FLASK_KEY') or secrets.token_hex(32)
+TAMANO_MAXIMO_PDF = 20 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = TAMANO_MAXIMO_PDF
 db = SQLAlchemy(app)
 
 CORS(app, origins=[o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()])
@@ -43,6 +53,10 @@ def _admin_acceso_denegado():
 
 
 class SecureModelView(ModelView):
+    # Basic Auth hace que el navegador reenvíe las credenciales solo, así que
+    # los formularios (incluido el de borrar) necesitan token CSRF.
+    form_base_class = SecureForm
+
     def is_accessible(self):
         return _credenciales_admin_validas(request.authorization)
 
@@ -73,6 +87,9 @@ class Recipe(db.Model):
             'fecha': self.fecha,
             'tipo_de_cambio': self.tipo_de_cambio,
             'drogueria': self.drogueria,
+            # Define la regla de precios que aplica el frontend (ver
+            # src/front/lib/precioFactura.js).
+            'formato': detectar_formato(self.texto),
         }
         if include_texto:
             data['texto'] = self.texto
@@ -90,10 +107,11 @@ class Medicina(db.Model):
     ALIC = db.Column(db.String, nullable=True)
     PRECIO_BS = db.Column(db.Float, nullable=True)
     PRECIO_USD = db.Column(db.Float, nullable=True)
-    DC = db.Column(db.Integer, nullable=True)
-    DD = db.Column(db.Integer, nullable=True)
-    DL = db.Column(db.Integer, nullable=True)
-    DV = db.Column(db.Integer, nullable=True)
+    # Porcentajes de descuento: pueden traer decimales (ej. 4,96 %).
+    DC = db.Column(db.Float, nullable=True)
+    DD = db.Column(db.Float, nullable=True)
+    DL = db.Column(db.Float, nullable=True)
+    DV = db.Column(db.Float, nullable=True)
     Neto_Bs = db.Column(db.Float, nullable=True)
     Neto_USD = db.Column(db.Float, nullable=True)
     TOT_NETO_Bs = db.Column(db.Float, nullable=True)
@@ -135,6 +153,19 @@ admin = Admin(
 admin.add_view(SecureModelView(Recipe, db.session))
 admin.add_view(SecureModelView(Medicina, db.session))
 
+
+@app.errorhandler(413)
+def _archivo_demasiado_grande(_error):
+    return jsonify({'error': 'El archivo supera el tamaño máximo permitido (20 MB)'}), 413
+
+
+def _error_interno(mensaje):
+    """Registra la excepción en curso y responde con un mensaje genérico, sin
+    exponer detalles internos al cliente."""
+    app.logger.exception(mensaje)
+    return jsonify({'error': mensaje}), 500
+
+
 @app.route('/facturas', methods=['GET'])
 def facturas():
     facturas = Recipe.query.all()
@@ -160,7 +191,11 @@ def _buscar_factura_duplicada(numero_factura, drogueria, file_bytes):
 def _guardar_factura(file_bytes):
     """Extrae los datos de una factura en PDF y la persiste. Compartido por
     /factura (subida directa) y /facturaurl (descarga remota)."""
-    extracted_data = extraer_datos_factura_pdf(BytesIO(file_bytes))
+    try:
+        extracted_data = extraer_datos_factura_pdf(BytesIO(file_bytes))
+    except Exception:
+        app.logger.exception("PDF ilegible")
+        return jsonify({'error': 'No se pudo leer el PDF'}), 400
 
     if not extracted_data:
         return jsonify({'error': 'No se pudo extraer información del PDF'}), 400
@@ -194,9 +229,9 @@ def _guardar_factura(file_bytes):
         db.session.add(recipe)
         db.session.commit()
         return jsonify({"factura": recipe.serialize()}), 201
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        return _error_interno('No se pudo guardar la factura')
     finally:
         db.session.close()
 
@@ -210,6 +245,8 @@ def factura():
         return jsonify({'error': 'No selected file'}), 400
 
     file_bytes = file.read()
+    if not file_bytes.startswith(b"%PDF"):
+        return jsonify({'error': 'El archivo no es un PDF válido'}), 400
     return _guardar_factura(file_bytes)
 
 
@@ -273,62 +310,35 @@ def addMedicina(idFactura):
         db.session.add(medicina)
     try:
         db.session.commit()
-        return jsonify({"medicamentos": list(map(lambda x: x, medicinas))}), 201
-    except Exception as e:
+        return jsonify({"medicamentos": medicinas}), 201
+    except Exception:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-    
+        return _error_interno('No se pudieron guardar los medicamentos')
+
+
 def export_to_excel(model, filename, sheet_name):
-    """Genera un archivo Excel con los datos de la tabla especificada."""
-    # Obtener los datos de la tabla
-    records = model.query.all()
-    data = [record.serialize() for record in records]
-
-    # Convertir a DataFrame de Pandas
-    df = pd.DataFrame(data)
-
-    # Guardar en un archivo Excel temporal
-    file_path = os.path.join(tempfile.gettempdir(), filename)
-    df.to_excel(file_path, sheet_name=sheet_name, index=False, engine="openpyxl")
-
-    return file_path
-
-def _cleanup_after_response(file_path):
-    @after_this_request
-    def cleanup(response):
-        try:
-            os.remove(file_path)
-        except OSError:
-            pass
-        return response
+    """Genera en memoria un Excel con los datos de la tabla y lo envía. Sin
+    archivo temporal, así dos descargas simultáneas no se pisan."""
+    data = [record.serialize() for record in model.query.all()]
+    buffer = BytesIO()
+    pd.DataFrame(data).to_excel(buffer, sheet_name=sheet_name, index=False, engine="openpyxl")
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 @app.route('/descargar/facturas')
 def download_recipes():
     """Endpoint para descargar la tabla Recipe en formato Excel."""
-    filename = "recipes.xlsx"
-    file_path = export_to_excel(Recipe, filename, "Recipes")
-    _cleanup_after_response(file_path)
-
-    return send_file(
-        file_path,
-        as_attachment=True,  # Fuerza la descarga
-        download_name=filename,  # Nombre visible en la descarga
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    return export_to_excel(Recipe, "recipes.xlsx", "Recipes")
 
 
 @app.route('/descargar/medicinas')
 def download_medicinas():
-    filename = "medicinas.xlsx"
-    file_path = export_to_excel(Medicina, filename, "Medicinas")
-    _cleanup_after_response(file_path)
-
-    return send_file(
-        file_path,
-        as_attachment=True,  # Fuerza la descarga
-        download_name=filename,  # Nombre visible en la descarga
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    return export_to_excel(Medicina, "medicinas.xlsx", "Medicinas")
 
 @app.route('/facturaurl', methods=['POST'])
 def procesar_pdf():
@@ -344,30 +354,47 @@ def procesar_pdf():
 
     try:
         response = requests.get(pdf_url, timeout=10, stream=True, allow_redirects=False)
-    except requests.RequestException as e:
-        return jsonify({"error": str(e)}), 500
+    except requests.RequestException:
+        app.logger.exception("Error descargando %s", pdf_url)
+        return jsonify({"error": "No se pudo descargar el PDF"}), 502
 
-    if response.status_code != 200:
-        return jsonify({"error": "No se pudo descargar el PDF"}), 400
+    with response:
+        if response.status_code != 200:
+            return jsonify({"error": "No se pudo descargar el PDF"}), 400
 
-    limite_bytes = 20 * 1024 * 1024
-    contenido = b""
-    for chunk in response.iter_content(chunk_size=8192):
-        contenido += chunk
-        if len(contenido) > limite_bytes:
-            return jsonify({"error": "El PDF supera el tamaño máximo permitido (20 MB)"}), 400
+        contenido = bytearray()
+        for chunk in response.iter_content(chunk_size=8192):
+            contenido += chunk
+            if len(contenido) > TAMANO_MAXIMO_PDF:
+                return jsonify({"error": "El PDF supera el tamaño máximo permitido (20 MB)"}), 400
 
     if not contenido.startswith(b"%PDF"):
         return jsonify({"error": "El contenido descargado no es un PDF válido"}), 400
 
-    return _guardar_factura(contenido)
+    return _guardar_factura(bytes(contenido))
     
 @app.route('/precio/<nombre>', methods=['GET'])
 def precio(nombre):
-    data = Medicina.query.filter(Medicina.descripcion.like(f"%{nombre}%")).all()
-    if not data:
+    """Busca medicamentos por descripción y devuelve cada coincidencia con su
+    factura (droguería, fecha, formato, tasa), de la más reciente a la más
+    vieja, para que el frontend calcule el precio de venta con la misma regla
+    que la vista "Precio por factura"."""
+    # % y _ del texto buscado se tratan como literales, no como comodines.
+    patron = nombre.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    resultados = (
+        db.session.query(Medicina, Recipe)
+        .outerjoin(Recipe, Medicina.id_factura == Recipe.id)
+        .filter(Medicina.descripcion.ilike(f"%{patron}%", escape="\\"))
+        .order_by(Recipe.id.desc(), Medicina.id)
+        .limit(100)
+        .all()
+    )
+    if not resultados:
         return jsonify({'error': 'Medicina not found'}), 404
-    return jsonify({"precios": [{"descripcion": med.descripcion, "precio": med.PRECIO_BS} for med in data]})
+    return jsonify({"precios": [
+        {**med.serialize(), "factura": factura.serialize(include_texto=False) if factura else None}
+        for med, factura in resultados
+    ]})
 
 if __name__ == '__main__':
     app.run(debug=os.getenv("FLASK_DEBUG") == "1")

@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node --test src/front/lib/"
+    "test": "node --test src/front/lib/*.test.js"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",

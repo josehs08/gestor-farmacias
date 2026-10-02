@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 // own paper panel above the ticket.
 export const UploadPDFByUrl = () => {
   const [pdfUrl, setPdfUrl] = useState("");
-  const [pdfContent, setPdfContent] = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -26,9 +25,8 @@ export const UploadPDFByUrl = () => {
         }
       );
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (response.ok) {
-        setPdfContent(data.content); // Mostrar el contenido del PDF si se extrajo
         alert("PDF procesado correctamente.");
       } else {
         alert(data.error || "Error procesando el PDF.");
@@ -58,17 +56,6 @@ export const UploadPDFByUrl = () => {
           Procesar PDF
         </Button>
       </form>
-
-      {pdfContent && (
-        <div className='min-w-0 border border-dashed border-border bg-muted/40 p-2'>
-          <h3 className='font-mono text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
-            Contenido extraído
-          </h3>
-          <pre className='mt-1 max-h-40 min-w-0 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground'>
-            {pdfContent}
-          </pre>
-        </div>
-      )}
     </div>
   );
 };

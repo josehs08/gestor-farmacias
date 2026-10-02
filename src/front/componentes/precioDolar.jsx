@@ -1,30 +1,7 @@
-import React, { useState, useEffect } from "react";
+import { useTasaBcv } from "../lib/useTasaBcv.js";
 
 export const PrecioDolar = () => {
-  const [status, setStatus] = useState("loading"); // loading | success | error
-  const [precio, setPrecio] = useState(null);
-
-  useEffect(() => {
-    const fetchPrecio = async () => {
-      setStatus("loading");
-      try {
-        const response = await fetch("https://ve.dolarapi.com/v1/dolares/oficial", {
-          method: "GET",
-        });
-        const data = await response.json();
-        if (response.ok) {
-          setPrecio(data.promedio);
-          setStatus("success");
-        } else {
-          setStatus("error");
-        }
-      } catch {
-        setStatus("error");
-      }
-    };
-
-    fetchPrecio();
-  }, []);
+  const { status, tasa } = useTasaBcv();
 
   return (
     <div className='flex min-w-0 flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border border-dashed border-border bg-muted/60 px-4 py-4 sm:px-5'>
@@ -40,7 +17,7 @@ export const PrecioDolar = () => {
       )}
       {status === "success" && (
         <div className='font-mono text-4xl font-semibold tabular-nums text-foreground'>
-          {Number(precio).toLocaleString("es-VE", { minimumFractionDigits: 2 })}
+          {Number(tasa).toLocaleString("es-VE", { minimumFractionDigits: 2 })}
           <span className='ml-2 text-base font-normal text-muted-foreground'>Bs/US$</span>
         </div>
       )}

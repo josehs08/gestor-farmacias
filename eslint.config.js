@@ -29,10 +29,19 @@ export default [
       ...react.configs['jsx-runtime'].rules,
       ...reactHooks.configs.recommended.rules,
       'react/jsx-no-target-blank': 'off',
+      // El proyecto no usa PropTypes (ni TypeScript): la regla solo genera ruido.
+      'react/prop-types': 'off',
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },
       ],
+    },
+  },
+  {
+    // Archivos de configuración que corren en Node, no en el navegador.
+    files: ['*.config.js'],
+    languageOptions: {
+      globals: { ...globals.node },
     },
   },
 ]
