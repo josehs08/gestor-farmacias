@@ -5,6 +5,7 @@ import pytest
 from src.back.utils import (
     _extraer_medicamentos_legacy,
     _numero_flexible,
+    _porcentaje,
     validar_url_publica,
 )
 
@@ -33,7 +34,7 @@ def test_legacy_parser_cantidad_mayor_o_igual_a_diez():
 
     assert medicamento["PRECIO_BS"] == pytest.approx(1234.56)
     assert isinstance(medicamento["PRECIO_BS"], float)
-    assert medicamento["DC"] == 5
+    assert medicamento["DC"] == 5.0
     assert medicamento["DD"] == 0
     assert medicamento["DL"] == 0
     assert medicamento["DV"] == 0
@@ -74,6 +75,7 @@ def test_validar_url_publica_rechaza_esquema_no_http():
         "http://127.0.0.1/factura.pdf",
         "http://10.0.0.1/factura.pdf",
         "http://169.254.169.254/latest/meta-data/",
+        "http://100.64.0.1/factura.pdf",  # CGNAT: ni privada ni pública
     ],
 )
 def test_validar_url_publica_rechaza_direcciones_no_publicas(url):
@@ -91,3 +93,11 @@ def test_validar_url_publica_acepta_host_publico(monkeypatch):
     ok, motivo = validar_url_publica("http://example.com/factura.pdf")
     assert ok is True
     assert motivo is None
+
+
+@pytest.mark.parametrize(
+    "valor,esperado",
+    [("5", 5.0), ("5.00", 5.0), ("4,96", 4.96), ("2.50%", 2.5), (None, None), ("abc", None)],
+)
+def test_porcentaje_conserva_decimales(valor, esperado):
+    assert _porcentaje(valor) == (pytest.approx(esperado) if esperado is not None else None)

@@ -1,5 +1,5 @@
-import PyPDF2
 import pdfplumber
+import pypdf
 import ipaddress
 import os
 import re
@@ -28,16 +28,6 @@ def _es_entero(valor):
         return None
 
 
-def _es_entero_redondeado(valor):
-    """Convierte un decimal con punto ('6.00') a entero, redondeando."""
-    if valor is None:
-        return None
-    try:
-        return round(float(valor))
-    except ValueError:
-        return None
-
-
 def _numero_flexible(valor):
     """Convierte un número de formato ambiguo ('.' o ',' como separador decimal)
     a float. El último separador encontrado se asume decimal; el resto de
@@ -53,6 +43,26 @@ def _numero_flexible(valor):
         return float(f"{entero_limpio}.{decimales}")
     except ValueError:
         return None
+
+
+def _porcentaje(valor):
+    """Convierte un porcentaje impreso ('5', '5.00', '4,96') a float sin
+    redondear: las droguerías dan descuentos con decimales (ej. 4,96 %) y
+    redondearlos altera la reconstrucción del precio de lista."""
+    if valor is None:
+        return None
+    limpio = valor.strip().rstrip("%")
+    if re.fullmatch(r"\d+", limpio):
+        return float(limpio)
+    return _numero_flexible(limpio)
+
+
+def _dividir(total, cantidad):
+    """Importe de la línea → valor unitario, para que Neto_* signifique lo
+    mismo (por unidad) en todos los formatos de factura."""
+    if total is None or not cantidad:
+        return None
+    return total / cantidad
 
 
 def _texto_o_none(lista_palabras):
@@ -87,14 +97,9 @@ def validar_url_publica(url):
             ip = ipaddress.ip_address(direccion)
         except ValueError:
             return False, "El host resolvió a una dirección IP inválida"
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
+        # is_global también excluye rangos que no son "privados" en sentido
+        # estricto pero tampoco son Internet pública (ej. CGNAT 100.64.0.0/10).
+        if not ip.is_global or ip.is_multicast:
             return False, "La URL resuelve a una dirección no pública"
 
     return True, None
@@ -110,10 +115,28 @@ def _tasa_a_texto(valor):
     return str(float(numero)) if numero is not None else None
 
 
+FORMATO_NENA = "nena"
+FORMATO_INSUAMINCA = "insuaminca"
+FORMATO_GUILLERMAR = "guillermar"
+
+
+def detectar_formato(texto):
+    """Identifica el formato de factura (y con él la regla de precios que usa
+    el frontend) a partir del texto extraído del PDF."""
+    if not texto:
+        return None
+    if "Número de Documento" in texto:
+        return FORMATO_NENA
+    if "Pedido de cliente" in texto:
+        return FORMATO_INSUAMINCA
+    return FORMATO_GUILLERMAR
+
+
 def parsear_encabezado_factura(texto):
     """Extrae número, fecha, tipo de cambio y droguería del texto de la
     primera página, según el formato de proveedor detectado."""
-    if "Número de Documento" in texto:
+    formato = detectar_formato(texto)
+    if formato == FORMATO_NENA:
         numero_factura = re.search(r"Número de Documento: (\d+)", texto)
         fecha = re.search(r"Fecha de Emisión: (\d{2}-\d{2}-\d{4})", texto)
         tipo_de_cambio = re.search(r"Tipo de Cambio \(USA \$\) Bs\. ([\d.,]+)", texto)
@@ -121,7 +144,7 @@ def parsear_encabezado_factura(texto):
         # La droguería (el vendedor, no la farmacia cliente) aparece en la
         # dirección de la sede: "...Edif, Droguería Nena, Guarenas...".
         drogueria = re.search(r"Droguería\s+([^,\n]+)", texto)
-    elif "Pedido de cliente" in texto:
+    elif formato == FORMATO_INSUAMINCA:
         # Formato "Pedido de cliente" (proveedor INSUAMINCA, C.A.): factura en
         # una sola moneda (USD), sin "Tipo de Cambio" explícito — el número de
         # pedido va después de "Número:" y la fecha después de "Fecha:"
@@ -155,7 +178,7 @@ def parsear_encabezado_factura(texto):
 
 
 def extraer_datos_factura_pdf(file):
-    reader = PyPDF2.PdfReader(file)
+    reader = pypdf.PdfReader(file)
     if len(reader.pages) == 0:
         return None
 
@@ -168,11 +191,12 @@ def extraer_datos_factura_pdf(file):
 
 
 def extraer_informacion_medicamentos(texto, pdf_bytes=None):
-    if "Número de Documento" in texto:
+    formato = detectar_formato(texto)
+    if formato == FORMATO_NENA:
         return _extraer_medicamentos_legacy(texto)
-    if pdf_bytes is None:
+    if pdf_bytes is None or formato is None:
         return []
-    if "Pedido de cliente" in texto:
+    if formato == FORMATO_INSUAMINCA:
         return _extraer_medicamentos_insuaminca(pdf_bytes)
     return _extraer_medicamentos_guillermar(pdf_bytes)
 
@@ -192,10 +216,10 @@ def _extraer_medicamentos_legacy(texto):
             "exp": coincidencia.group(6),
             "ALIC": coincidencia.group(7),
             "PRECIO_BS": _numero_flexible(coincidencia.group(8)),
-            "DC": _es_entero(coincidencia.group(9)),
-            "DD": _es_entero(coincidencia.group(10)),
-            "DL": _es_entero(coincidencia.group(11)),
-            "DV": _es_entero(coincidencia.group(12)),
+            "DC": _porcentaje(coincidencia.group(9)),
+            "DD": _porcentaje(coincidencia.group(10)),
+            "DL": _porcentaje(coincidencia.group(11)),
+            "DV": _porcentaje(coincidencia.group(12)),
             "Neto Bs": _numero_flexible(coincidencia.group(13)),
             "Neto USD": _numero_flexible(coincidencia.group(14)),
             "TOT. NETO Bs": _numero_flexible(coincidencia.group(15)),
@@ -208,7 +232,7 @@ def _extraer_medicamentos_legacy(texto):
 def _agrupar_por_filas(words, tolerancia=2.0):
     """Agrupa palabras de pdfplumber en filas visuales según su posición vertical.
 
-    PyPDF2.extract_text() pega estas columnas sin espacio (columnas angostas
+    pypdf (extract_text) pega estas columnas sin espacio (columnas angostas
     sin hueco real entre caracteres), así que el texto plano no alcanza para
     separarlas. pdfplumber sí conserva la posición (x0/top) de cada palabra,
     así que reconstruimos la tabla por coordenadas en vez de por regex sobre
@@ -247,11 +271,12 @@ def _extraer_medicamentos_guillermar(pdf_bytes):
             continue
 
         descripcion = " ".join(w["text"] for w in fila[:-12])
+        cantidad = _es_entero(cant)
         imp_bs = _es_numero_latino(impbs)
         imp_usd = _es_numero_latino(impusd)
 
         medicamentos.append({
-            "cantidad": _es_entero(cant),
+            "cantidad": cantidad,
             "codigo": None,
             "descripcion": descripcion,
             "bulto": None,
@@ -260,12 +285,12 @@ def _extraer_medicamentos_guillermar(pdf_bytes):
             "ALIC": iva,
             "PRECIO_BS": _es_numero_latino(precu),
             "PRECIO_USD": _es_numero_latino(precusd),
-            "DC": _es_entero(d1),
-            "DD": _es_entero(d2),
-            "DL": _es_entero(d3),
-            "DV": _es_entero(d4),
-            "Neto Bs": imp_bs,
-            "Neto USD": imp_usd,
+            "DC": _porcentaje(d1),
+            "DD": _porcentaje(d2),
+            "DL": _porcentaje(d3),
+            "DV": _porcentaje(d4),
+            "Neto Bs": _dividir(imp_bs, cantidad),
+            "Neto USD": _dividir(imp_usd, cantidad),
             "TOT. NETO Bs": imp_bs,
             "TOT. NETO USD": imp_usd,
         })
@@ -358,8 +383,9 @@ def _items_insuaminca(filas):
     medicamentos = []
     for top, datos in items:
         importe = _es_numero_latino(_texto_o_none(datos["importe"]))
+        cantidad = _es_entero(_texto_o_none(datos["cantidad"]))
         medicamentos.append({
-            "cantidad": _es_entero(_texto_o_none(datos["cantidad"])),
+            "cantidad": cantidad,
             "codigo": _texto_o_none(datos["codigo"]),
             "descripcion": " ".join(filter(None, descripciones[top])),
             "bulto": None,
@@ -368,12 +394,12 @@ def _items_insuaminca(filas):
             "ALIC": None,
             "PRECIO_BS": None,
             "PRECIO_USD": _es_numero_latino(_texto_o_none(datos["precio"])),
-            "DC": _es_entero_redondeado(_texto_o_none(datos["seg"])),
-            "DD": _es_entero_redondeado(_texto_o_none(datos["escprd"])),
-            "DL": _es_entero_redondeado(_texto_o_none(datos["escprv"])),
-            "DV": _es_entero_redondeado(_texto_o_none(datos["descprv"])),
+            "DC": _porcentaje(_texto_o_none(datos["seg"])),
+            "DD": _porcentaje(_texto_o_none(datos["escprd"])),
+            "DL": _porcentaje(_texto_o_none(datos["escprv"])),
+            "DV": _porcentaje(_texto_o_none(datos["descprv"])),
             "Neto Bs": None,
-            "Neto USD": importe,
+            "Neto USD": _dividir(importe, cantidad),
             "TOT. NETO Bs": None,
             "TOT. NETO USD": importe,
         })

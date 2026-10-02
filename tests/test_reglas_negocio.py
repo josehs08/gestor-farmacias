@@ -7,7 +7,7 @@ from src.back import utils
 from src.back.utils import extraer_datos_factura_pdf, parsear_encabezado_factura
 
 
-# --- Fakes for pdfplumber / PyPDF2 -----------------------------------------
+# --- Fakes for pdfplumber / pypdf ------------------------------------------
 
 def _palabra(texto, x0, top):
     return {"text": texto, "x0": x0, "top": top}
@@ -44,7 +44,7 @@ def _fila_guillermar(descripcion, lote, top):
     return palabras
 
 
-def _fila_insuaminca(codigo, descripcion, top):
+def _fila_insuaminca(codigo, descripcion, top, esc_prd="0.00"):
     return [
         _palabra(codigo, 10, top),
         _palabra(descripcion, 80, top),
@@ -52,7 +52,7 @@ def _fila_insuaminca(codigo, descripcion, top):
         _palabra("L1", 260, top),
         _palabra("2027-05", 300, top),
         _palabra("5.00", 345, top),
-        _palabra("0.00", 380, top),
+        _palabra(esc_prd, 380, top),
         _palabra("0.00", 410, top),
         _palabra("0.00", 440, top),
         _palabra("4,50", 480, top),
@@ -117,7 +117,7 @@ def test_texto_de_factura_incluye_todas_las_paginas(monkeypatch):
                 _PaginaPyPDF("linea pagina 2"),
             ]
 
-    monkeypatch.setattr(utils.PyPDF2, "PdfReader", _Reader)
+    monkeypatch.setattr(utils.pypdf, "PdfReader", _Reader)
 
     factura = extraer_datos_factura_pdf(BytesIO(b"%PDF"))
 
@@ -217,3 +217,133 @@ def test_extraccion_sin_medicamentos_devuelve_422_y_permite_reintentar(cliente, 
         lambda *_a: [{"descripcion": "ATAMEL", "cantidad": 1}],
     )
     assert cliente.post(f"/medicina/{factura_id}").status_code == 201
+
+
+def test_insuaminca_descuentos_con_decimales_no_se_redondean(monkeypatch):
+    _fake_pdfplumber(monkeypatch, [
+        _encabezado_insuaminca(50) + _fila_insuaminca("C1", "ATAMEL", 100, esc_prd="2.50"),
+    ])
+
+    [item] = utils._extraer_medicamentos_insuaminca(b"%PDF")
+
+    assert item["DC"] == 5.0
+    assert item["DD"] == 2.5
+
+
+def test_neto_es_unitario_en_todos_los_formatos(monkeypatch):
+    # Importe de la línea 13,50 por 3 unidades → neto unitario 4,50, igual
+    # que en el formato Nena, donde Neto ya viene por unidad.
+    _fake_pdfplumber(monkeypatch, [_encabezado_insuaminca(50) + _fila_insuaminca("C1", "ATAMEL", 100)])
+    [insuaminca] = utils._extraer_medicamentos_insuaminca(b"%PDF")
+    assert insuaminca["Neto USD"] == pytest.approx(4.50)
+    assert insuaminca["TOT. NETO USD"] == pytest.approx(13.50)
+
+    # GUILLER MAR: 2 unidades, importe 200,00 Bs / 2,00 US$.
+    _fake_pdfplumber(monkeypatch, [_fila_guillermar("ATAMEL", "L1", 100)])
+    [guillermar] = utils._extraer_medicamentos_guillermar(b"%PDF")
+    assert guillermar["Neto Bs"] == pytest.approx(100.0)
+    assert guillermar["Neto USD"] == pytest.approx(1.0)
+    assert guillermar["TOT. NETO Bs"] == pytest.approx(200.0)
+
+
+@pytest.mark.parametrize(
+    "texto,formato",
+    [
+        ("Número de Documento: 1", "nena"),
+        ("INSUAMINCA, C.A. RIF: J-1\nPedido de cliente", "insuaminca"),
+        ("FACTURA 0001", "guillermar"),
+        (None, None),
+    ],
+)
+def test_detectar_formato(texto, formato):
+    assert utils.detectar_formato(texto) == formato
+
+
+def test_subir_archivo_que_no_es_pdf_devuelve_400(cliente):
+    respuesta = cliente.post(
+        "/factura",
+        data={"file": (BytesIO(b"no soy un pdf"), "f.pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert respuesta.status_code == 400
+
+
+def test_subir_archivo_demasiado_grande_devuelve_413(cliente):
+    contenido = b"%PDF" + b"0" * app_module.TAMANO_MAXIMO_PDF
+
+    respuesta = _subir(cliente, contenido)
+
+    assert respuesta.status_code == 413
+    assert "error" in respuesta.get_json()
+
+
+def test_factura_serializada_incluye_formato(cliente, monkeypatch):
+    _fake_extraccion(monkeypatch)
+    factura_id = _subir(cliente).get_json()["factura"]["id"]
+    with app_module.app.app_context():
+        recipe = app_module.db.session.get(app_module.Recipe, factura_id)
+        recipe.texto = "Número de Documento: 0001"
+        app_module.db.session.commit()
+
+    [factura] = cliente.get("/facturas").get_json()
+
+    assert factura["formato"] == "nena"
+
+
+def _guardar_medicamentos(cliente, monkeypatch, descripciones):
+    _fake_extraccion(monkeypatch)
+    factura_id = _subir(cliente).get_json()["factura"]["id"]
+    monkeypatch.setattr(
+        app_module,
+        "extraer_informacion_medicamentos",
+        lambda *_a: [{"descripcion": d, "cantidad": 1, "PRECIO_USD": 2.0, "DD": 2.5} for d in descripciones],
+    )
+    assert cliente.post(f"/medicina/{factura_id}").status_code == 201
+    return factura_id
+
+
+def test_precio_devuelve_medicamento_con_su_factura(cliente, monkeypatch):
+    factura_id = _guardar_medicamentos(cliente, monkeypatch, ["ATAMEL 500MG"])
+
+    [resultado] = cliente.get("/precio/atamel").get_json()["precios"]
+
+    assert resultado["descripcion"] == "ATAMEL 500MG"
+    assert resultado["DD"] == 2.5
+    assert resultado["factura"]["id"] == factura_id
+    assert resultado["factura"]["drogueria"] == "Nena"
+
+
+def test_precio_trata_comodines_como_texto_literal(cliente, monkeypatch):
+    _guardar_medicamentos(cliente, monkeypatch, ["ATAMEL 500MG", "CREMA 10% UREA"])
+
+    assert cliente.get("/precio/%25").get_json()["precios"][0]["descripcion"] == "CREMA 10% UREA"
+    assert len(cliente.get("/precio/%25").get_json()["precios"]) == 1
+    assert cliente.get("/precio/_").status_code == 404
+
+
+def test_descargar_excel_no_deja_archivos_temporales(cliente, monkeypatch):
+    _guardar_medicamentos(cliente, monkeypatch, ["ATAMEL"])
+
+    respuesta = cliente.get("/descargar/medicinas")
+
+    assert respuesta.status_code == 200
+    assert respuesta.data.startswith(b"PK")  # .xlsx es un zip
+
+
+def test_pdf_corrupto_devuelve_400(cliente):
+    respuesta = _subir(cliente, b"%PDF-1.4 esto no es un pdf de verdad")
+
+    assert respuesta.status_code == 400
+
+
+def test_formularios_del_admin_llevan_token_csrf(cliente, monkeypatch):
+    monkeypatch.setenv("ADMIN_USER", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "secreto")
+
+    sin_credenciales = cliente.get("/admin/medicina/new/")
+    con_credenciales = cliente.get("/admin/medicina/new/", auth=("admin", "secreto"))
+
+    assert sin_credenciales.status_code == 401
+    assert con_credenciales.status_code == 200
+    assert b"csrf_token" in con_credenciales.data
