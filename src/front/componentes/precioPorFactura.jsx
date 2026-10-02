@@ -20,23 +20,20 @@ import {
 import { Plate, PlateFiscalHeader, PlateFooter } from "@/components/ui/plate";
 import { TicketStatusRow } from "./ticketStatus.jsx";
 import { WorkSurface } from "./workSurface.jsx";
-import { MARGEN_VENTA_DEFAULT, calcularPreciosLinea, calcularTotalesFactura } from "../lib/precioFactura.js";
+import { calcularPreciosLinea, calcularTotalesFactura } from "../lib/precioFactura.js";
 import { obtenerEtiquetasDescuento } from "../lib/etiquetasDescuento.js";
+import { useMargenVenta } from "../lib/useMargenVenta.js";
 
-const MARGEN_STORAGE_KEY = "gestor-farmacias:margen-ganancia";
+const COLUMNAS_DESCUENTO = ["DC", "DD", "DL", "DV"];
+const TOTAL_COLUMNAS = 12;
+
+const formatPorcentaje = (valor) =>
+  `${(Number(valor) || 0).toLocaleString("es-VE", { maximumFractionDigits: 2 })}%`;
 
 const formatNumero = (valor) =>
   valor == null
     ? "—"
     : valor.toLocaleString("es-VE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-const leerMargenGuardado = () => {
-  try {
-    return localStorage.getItem(MARGEN_STORAGE_KEY) ?? String(MARGEN_VENTA_DEFAULT);
-  } catch {
-    return String(MARGEN_VENTA_DEFAULT);
-  }
-};
 
 const PrecioPorFactura = () => {
   const [facturas, setFacturas] = useState([]);
@@ -44,17 +41,7 @@ const PrecioPorFactura = () => {
   const [facturaSeleccionada, setFacturaSeleccionada] = useState(null);
   const [medicamentos, setMedicamentos] = useState([]);
   const [medicamentosStatus, setMedicamentosStatus] = useState("idle"); // idle | loading | success | error
-  const [margen, setMargen] = useState(leerMargenGuardado);
-
-  const handleMargenChange = (event) => {
-    const valor = event.target.value;
-    setMargen(valor);
-    try {
-      localStorage.setItem(MARGEN_STORAGE_KEY, valor);
-    } catch {
-      // localStorage puede no estar disponible (modo privado, etc.); no es crítico.
-    }
-  };
+  const [margen, setMargen] = useMargenVenta();
 
   const fetchFacturas = useCallback(async () => {
     setStatus("loading");
@@ -153,13 +140,17 @@ const PrecioPorFactura = () => {
         open={facturaSeleccionada !== null}
         onOpenChange={(open) => !open && setFacturaSeleccionada(null)}
       >
-        <DialogContent className='w-[calc(100%-2rem)] sm:max-w-[95vw] lg:max-w-6xl'>
+        <DialogContent className='w-[calc(100%-2rem)] sm:max-w-[95vw] lg:max-w-6xl xl:max-w-7xl'>
           <DialogHeader>
             <DialogTitle>Precio por factura — {facturaSeleccionada?.numero_factura}</DialogTitle>
             <DialogDescription>
-              {facturaSeleccionada?.drogueria || "Droguería sin identificar"}. El precio ya viene
-              con descuento incluido; &ldquo;sin descuento&rdquo; reconstruye el precio de lista
-              revirtiendo solo los descuentos del distribuidor (no el margen propio).
+              {facturaSeleccionada?.drogueria || "Droguería sin identificar"} — Venta = precio de
+              lista + % de ganancia + IVA; &ldquo;con descuento&rdquo; le traslada al cliente los
+              descuentos del distribuidor
+              {facturaSeleccionada?.formato === "insuaminca" && " (el Seg queda para la farmacia)"}
+              {!["nena", "insuaminca"].includes(facturaSeleccionada?.formato) &&
+                ". Este formato todavía no tiene regla confirmada: el precio se toma tal cual"}
+              .
             </DialogDescription>
           </DialogHeader>
 
@@ -172,7 +163,7 @@ const PrecioPorFactura = () => {
                 min='0'
                 step='0.01'
                 value={margen}
-                onChange={handleMargenChange}
+                onChange={(event) => setMargen(event.target.value)}
               />
             </div>
           </div>
@@ -183,11 +174,14 @@ const PrecioPorFactura = () => {
                 <TableRow>
                   <TableHead>Descripción</TableHead>
                   <TableHead numeric>Cantidad</TableHead>
-                  <TableHead numeric>Precio (US$)</TableHead>
-                  <TableHead numeric>{etiquetasDescuento.DC}</TableHead>
-                  <TableHead numeric>{etiquetasDescuento.DD}</TableHead>
-                  <TableHead numeric>{etiquetasDescuento.DL}</TableHead>
-                  <TableHead numeric>Precio sin descuento</TableHead>
+                  <TableHead numeric>Costo (US$)</TableHead>
+                  {COLUMNAS_DESCUENTO.map((columna) => (
+                    <TableHead key={columna} numeric>
+                      {etiquetasDescuento[columna]}
+                    </TableHead>
+                  ))}
+                  <TableHead numeric>IVA</TableHead>
+                  <TableHead numeric>Precio de lista</TableHead>
                   <TableHead numeric className='bg-accent text-accent-foreground'>
                     Venta con descuento (+{margen || 0}%)
                   </TableHead>
@@ -198,11 +192,11 @@ const PrecioPorFactura = () => {
               </TableHeader>
               <TableBody>
                 {medicamentosStatus === "loading" && (
-                  <TicketStatusRow colSpan={9}>Imprimiendo renglones…</TicketStatusRow>
+                  <TicketStatusRow colSpan={TOTAL_COLUMNAS}>Imprimiendo renglones…</TicketStatusRow>
                 )}
                 {medicamentosStatus === "error" && (
                   <TicketStatusRow
-                    colSpan={9}
+                    colSpan={TOTAL_COLUMNAS}
                     tone='error'
                     onRetry={() => verPrecios(facturaSeleccionada)}
                   >
@@ -210,7 +204,7 @@ const PrecioPorFactura = () => {
                   </TicketStatusRow>
                 )}
                 {medicamentosStatus === "success" && medicamentos.length === 0 && (
-                  <TicketStatusRow colSpan={9}>
+                  <TicketStatusRow colSpan={TOTAL_COLUMNAS}>
                     *** Todavía sin medicamentos extraídos ***
                   </TicketStatusRow>
                 )}
@@ -225,18 +219,19 @@ const PrecioPorFactura = () => {
                       <TableRow key={medicamento.id}>
                         <TableCell>{medicamento.descripcion}</TableCell>
                         <TableCell numeric>{medicamento.cantidad}</TableCell>
-                        <TableCell numeric>{formatNumero(precios.precioUnitario)}</TableCell>
-                        <TableCell numeric>{precios.descuentos[0] || 0}%</TableCell>
-                        <TableCell numeric>{precios.descuentos[1] || 0}%</TableCell>
-                        <TableCell numeric>{precios.descuentos[2] || 0}%</TableCell>
-                        <TableCell numeric>
-                          {formatNumero(precios.precioSinDescuentoUnitario)}
+                        <TableCell numeric>{formatNumero(precios.costoUnitario)}</TableCell>
+                        {COLUMNAS_DESCUENTO.map((columna) => (
+                          <TableCell key={columna} numeric>
+                            {formatPorcentaje(precios.descuentos[columna])}
+                          </TableCell>
+                        ))}
+                        <TableCell numeric>{formatPorcentaje(precios.iva * 100)}</TableCell>
+                        <TableCell numeric>{formatNumero(precios.costoListaUnitario)}</TableCell>
+                        <TableCell numeric className='bg-accent/60 font-semibold'>
+                          {formatNumero(precios.ventaConDescuentoUnitario)}
                         </TableCell>
                         <TableCell numeric className='bg-accent/60 font-semibold'>
-                          {formatNumero(precios.precioVentaConDescuentoUnitario)}
-                        </TableCell>
-                        <TableCell numeric className='bg-accent/60 font-semibold'>
-                          {formatNumero(precios.precioVentaSinDescuentoUnitario)}
+                          {formatNumero(precios.ventaSinDescuentoUnitario)}
                         </TableCell>
                       </TableRow>
                     );
@@ -245,20 +240,23 @@ const PrecioPorFactura = () => {
               {medicamentosStatus === "success" && medicamentos.length > 0 && totales && (
                 <TableFooter>
                   <TableRow>
-                    <TableCell colSpan={3} className='font-mono font-semibold uppercase'>
+                    <TableCell colSpan={2} className='font-mono font-semibold uppercase'>
                       Total factura (US$)
                       {totales.lineasSinPrecio > 0 &&
                         ` — ${totales.lineasSinPrecio} sin precio en US$`}
                     </TableCell>
-                    <TableCell colSpan={3} />
                     <TableCell numeric className='font-semibold'>
-                      {formatNumero(totales.precioSinDescuento)}
+                      {formatNumero(totales.costo)}
+                    </TableCell>
+                    <TableCell colSpan={COLUMNAS_DESCUENTO.length + 1} />
+                    <TableCell numeric className='font-semibold'>
+                      {formatNumero(totales.costoLista)}
                     </TableCell>
                     <TableCell numeric className='bg-accent font-semibold text-accent-foreground'>
-                      {formatNumero(totales.precioVentaConDescuento)}
+                      {formatNumero(totales.ventaConDescuento)}
                     </TableCell>
                     <TableCell numeric className='bg-accent font-semibold text-accent-foreground'>
-                      {formatNumero(totales.precioVentaSinDescuento)}
+                      {formatNumero(totales.ventaSinDescuento)}
                     </TableCell>
                   </TableRow>
                 </TableFooter>

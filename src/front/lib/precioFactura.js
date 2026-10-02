@@ -1,25 +1,54 @@
 /**
- * Pricing for medicamentos.
+ * Precios de venta por línea de factura.
  *
- * INSUAMINCA ("Pedido de cliente"): the stored `PRECIO_USD` already has all
- * three discount tiers folded in (it's what the pharmacy actually pays). Of
- * those, `Seg` (DC) is the pharmacy's own margin — not a supplier discount —
- * and is never reversed. Only `ESC PRD` (DD) and `ESC PRV` (DL) are real
- * distributor discounts, so the list ("sin descuento") price is recovered by
- * dividing the net price by (1 - DD%) × (1 - DL%). Confirmed with the
- * business owner 2026-09-19.
+ * Las fórmulas replican las hojas de cálculo con las que la farmacia ponía
+ * precios antes de esta app (PEDIDOS_DROGUERIA_NENA_2025.ods,
+ * precios_Vitalclinic_2025.xlsx y DROG_INSUAMINCA.ods). En todas:
  *
- * Other suppliers (Nena, etc.) don't have a confirmed rule yet — the price
- * is shown as-is, with no discount reversed, until that's worked out
- * separately. Don't extend the INSUAMINCA formula to them by assumption.
+ *   venta sin descuento = precio de lista × (1 + margen) × (1 + IVA)
+ *   venta con descuento = venta sin descuento × (1 − descuentos trasladables)
  *
- * Every figure here is in US$. Lines that only carry a Bs price (the
- * "Número de Documento" layout) are converted with the invoice's own
- * exchange rate; without a rate the line has no USD price (null) and is
- * left out of the totals rather than mixing Bs into USD sums.
+ * El margen es un recargo sobre el costo (la hoja multiplica por 1,3 para un
+ * 30 %), no un margen sobre el precio de venta.
+ *
+ * Lo que cambia por droguería es qué precio trae la factura y qué descuentos
+ * se le trasladan al cliente:
+ *
+ * - Nena (formato "Número de Documento"): PRECIO_BS es el precio de lista,
+ *   antes de descuentos (el neto de la factura es PRECIO_BS × (1 − desc.)).
+ *   Todos los descuentos (DC/DD/DL/DV) se trasladan. Columna "costo" de la
+ *   hoja = PRECIO_BS; "Descuento" = el descuento de la línea.
+ *
+ * - INSUAMINCA ("Pedido de cliente"): el precio ya trae todos los descuentos
+ *   aplicados. El precio de lista se reconstruye revirtiendo Seg (DC, el 7 %
+ *   fijo de la farmacia), ESC PRD (DD), ESC PRV (DL) y DESC PRV (DV). Al
+ *   cliente solo se le trasladan los del distribuidor (DD/DL/DV): Seg queda
+ *   como ganancia de la farmacia. En la hoja: M = E / ((1−G)(1−H)(1−I)),
+ *   N = M × 1,3 y P = N × (1−H)(1−I).
+ *
+ * - Otros formatos (GUILLER MAR): sin hoja de referencia todavía. El precio
+ *   se toma tal cual, sin revertir ni trasladar descuentos.
+ *
+ * El IVA sale de ALIC (16 % o 0 % para exentos "(E)"). Todo se expresa en
+ * US$: si la línea solo trae precio en Bs se convierte con la tasa de la
+ * propia factura; sin tasa la línea queda sin precio (null) y fuera de los
+ * totales, en vez de mezclar Bs con US$.
  */
 
 export const MARGEN_VENTA_DEFAULT = 30;
+
+const DESCUENTOS = ["DC", "DD", "DL", "DV"];
+
+const REGLAS_POR_FORMATO = {
+  nena: { precioEsLista: true, propios: [], trasladables: DESCUENTOS },
+  insuaminca: { precioEsLista: false, propios: ["DC"], trasladables: ["DD", "DL", "DV"] },
+};
+
+const REGLA_SIN_CONFIRMAR = { precioEsLista: false, propios: [], trasladables: [] };
+
+export function obtenerReglaPrecios(factura) {
+  return REGLAS_POR_FORMATO[factura?.formato] ?? REGLA_SIN_CONFIRMAR;
+}
 
 export function aplicarDescuentosEscalonados(precio, porcentajes) {
   return porcentajes.reduce(
@@ -28,92 +57,95 @@ export function aplicarDescuentosEscalonados(precio, porcentajes) {
   );
 }
 
-function esInsuaminca(drogueria) {
-  return (drogueria || "").toUpperCase().includes("INSUAMINCA");
+function precioUsdUnitario(medicamento, factura, regla) {
+  const tasa = Number(factura?.tipo_de_cambio);
+  const desdeBs = medicamento.PRECIO_BS != null && tasa > 0 ? Number(medicamento.PRECIO_BS) / tasa : null;
+  // En Nena PRECIO_BS es el precio de lista impreso en la factura; se
+  // prefiere a PRECIO_USD para que el resultado coincida con la hoja.
+  if (regla.precioEsLista && desdeBs !== null) return desdeBs;
+  if (medicamento.PRECIO_USD != null) return Number(medicamento.PRECIO_USD) || 0;
+  return desdeBs;
 }
 
-function precioUsdUnitario(medicamento, tipoDeCambio) {
-  if (medicamento.PRECIO_USD != null) return Number(medicamento.PRECIO_USD) || 0;
-  const tasa = Number(tipoDeCambio);
-  if (medicamento.PRECIO_BS != null && tasa > 0) return Number(medicamento.PRECIO_BS) / tasa;
-  return null;
+export function alicuotaIva(medicamento) {
+  const alicuota = Number(String(medicamento.ALIC ?? "").replace(",", "."));
+  return alicuota > 0 ? alicuota / 100 : 0;
 }
 
 const PRECIOS_VACIOS = {
-  precioUnitario: null,
-  precioSinDescuentoUnitario: null,
-  precioVentaConDescuentoUnitario: null,
-  precioVentaSinDescuentoUnitario: null,
-  precioTotal: null,
-  precioSinDescuentoTotal: null,
-  precioVentaConDescuentoTotal: null,
-  precioVentaSinDescuentoTotal: null,
+  costoUnitario: null,
+  costoListaUnitario: null,
+  ventaConDescuentoUnitario: null,
+  ventaSinDescuentoUnitario: null,
+  costoTotal: null,
+  costoListaTotal: null,
+  ventaConDescuentoTotal: null,
+  ventaSinDescuentoTotal: null,
 };
 
 /**
- * Computes the net price, the reconstructed list price, and the two
- * possible sale prices (selling off the net price vs. off the list price)
- * for one line item, both per unit and totaled for the line (multiplied by
- * `cantidad`).
+ * Costo neto (lo que paga la farmacia), precio de lista, y los dos precios
+ * de venta posibles, por unidad y por línea (× cantidad). Todo en US$.
  */
 export function calcularPreciosLinea(medicamento, factura, margenPorcentaje = MARGEN_VENTA_DEFAULT) {
-  const descuentos = [medicamento.DC, medicamento.DD, medicamento.DL].map((d) => Number(d) || 0);
-  const precioUnitario = precioUsdUnitario(medicamento, factura?.tipo_de_cambio);
-  if (precioUnitario === null) return { ...PRECIOS_VACIOS, descuentos };
+  const regla = obtenerReglaPrecios(factura);
+  const descuentos = Object.fromEntries(DESCUENTOS.map((d) => [d, Number(medicamento[d]) || 0]));
+  const iva = alicuotaIva(medicamento);
+  const precio = precioUsdUnitario(medicamento, factura, regla);
+  if (precio === null) return { ...PRECIOS_VACIOS, descuentos, iva };
 
-  const cantidad = medicamento.cantidad == null ? 1 : Number(medicamento.cantidad) || 0;
-  const margen = Number(margenPorcentaje) || 0;
+  const factorTrasladable = aplicarDescuentosEscalonados(1, regla.trasladables.map((d) => descuentos[d]));
+  const factorPropio = aplicarDescuentosEscalonados(1, regla.propios.map((d) => descuentos[d]));
+  const factorTotal = factorTrasladable * factorPropio;
 
-  let precioSinDescuentoUnitario = precioUnitario;
-  if (esInsuaminca(factura?.drogueria)) {
-    const factorReversion = aplicarDescuentosEscalonados(1, [medicamento.DD, medicamento.DL]);
-    precioSinDescuentoUnitario = factorReversion > 0 ? precioUnitario / factorReversion : precioUnitario;
+  let costoUnitario = precio;
+  let costoListaUnitario = precio;
+  if (regla.precioEsLista) {
+    costoUnitario = precio * factorTotal;
+  } else if (factorTotal > 0) {
+    costoListaUnitario = precio / factorTotal;
   }
 
-  const precioVentaConDescuentoUnitario = precioUnitario * (1 + margen / 100);
-  const precioVentaSinDescuentoUnitario = precioSinDescuentoUnitario * (1 + margen / 100);
+  const margen = Number(margenPorcentaje) || 0;
+  const ventaSinDescuentoUnitario = costoListaUnitario * (1 + margen / 100) * (1 + iva);
+  const ventaConDescuentoUnitario = ventaSinDescuentoUnitario * factorTrasladable;
+
+  const cantidad = medicamento.cantidad == null ? 1 : Number(medicamento.cantidad) || 0;
 
   return {
-    precioUnitario,
     descuentos,
-    precioSinDescuentoUnitario,
-    precioVentaConDescuentoUnitario,
-    precioVentaSinDescuentoUnitario,
-    precioTotal: precioUnitario * cantidad,
-    precioSinDescuentoTotal: precioSinDescuentoUnitario * cantidad,
-    precioVentaConDescuentoTotal: precioVentaConDescuentoUnitario * cantidad,
-    precioVentaSinDescuentoTotal: precioVentaSinDescuentoUnitario * cantidad,
+    iva,
+    costoUnitario,
+    costoListaUnitario,
+    ventaConDescuentoUnitario,
+    ventaSinDescuentoUnitario,
+    costoTotal: costoUnitario * cantidad,
+    costoListaTotal: costoListaUnitario * cantidad,
+    ventaConDescuentoTotal: ventaConDescuentoUnitario * cantidad,
+    ventaSinDescuentoTotal: ventaSinDescuentoUnitario * cantidad,
   };
 }
 
 /**
- * Sums the per-line totals into invoice-level totals. Lines without a USD
- * price are skipped and counted in `lineasSinPrecio` so the UI can flag
- * that the total is incomplete.
+ * Suma los totales de cada línea. Las líneas sin precio en US$ se omiten y
+ * se cuentan en `lineasSinPrecio` para que la UI avise que el total está
+ * incompleto.
  */
 export function calcularTotalesFactura(medicamentos, factura, margenPorcentaje = MARGEN_VENTA_DEFAULT) {
   return medicamentos.reduce(
     (totales, medicamento) => {
       const precios = calcularPreciosLinea(medicamento, factura, margenPorcentaje);
-      if (precios.precioUnitario === null) {
+      if (precios.costoUnitario === null) {
         return { ...totales, lineasSinPrecio: totales.lineasSinPrecio + 1 };
       }
       return {
         ...totales,
-        precio: totales.precio + precios.precioTotal,
-        precioSinDescuento: totales.precioSinDescuento + precios.precioSinDescuentoTotal,
-        precioVentaConDescuento:
-          totales.precioVentaConDescuento + precios.precioVentaConDescuentoTotal,
-        precioVentaSinDescuento:
-          totales.precioVentaSinDescuento + precios.precioVentaSinDescuentoTotal,
+        costo: totales.costo + precios.costoTotal,
+        costoLista: totales.costoLista + precios.costoListaTotal,
+        ventaConDescuento: totales.ventaConDescuento + precios.ventaConDescuentoTotal,
+        ventaSinDescuento: totales.ventaSinDescuento + precios.ventaSinDescuentoTotal,
       };
     },
-    {
-      precio: 0,
-      precioSinDescuento: 0,
-      precioVentaConDescuento: 0,
-      precioVentaSinDescuento: 0,
-      lineasSinPrecio: 0,
-    }
+    { costo: 0, costoLista: 0, ventaConDescuento: 0, ventaSinDescuento: 0, lineasSinPrecio: 0 }
   );
 }

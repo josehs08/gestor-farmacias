@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Table,
   TableBody,
@@ -81,8 +81,9 @@ const ListaMedicamentos = () => {
   );
 
   const etiquetasDescuento = obtenerEtiquetasDescuento(drogueriaActiva);
-  const totalNetoBs = formatNumero(sumar(medicamentosFiltrados, "Neto_Bs"));
-  const totalNetoUsd = formatNumero(sumar(medicamentosFiltrados, "Neto_USD"));
+  // Totales sobre TOT_NETO_* (importe de la línea): Neto_* es por unidad.
+  const totalNetoBs = formatNumero(sumar(medicamentosFiltrados, "TOT_NETO_Bs"));
+  const totalNetoUsd = formatNumero(sumar(medicamentosFiltrados, "TOT_NETO_USD"));
 
   return (
     <WorkSurface actions={<DescargarExcel tipo='medicinas' />}>
