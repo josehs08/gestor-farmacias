@@ -101,3 +101,15 @@ test("formato sin regla confirmada: precio tal cual, con IVA y margen", () => {
   cerca(p.ventaSinDescuentoUnitario, 10 * 1.3 * 1.16);
   cerca(p.ventaConDescuentoUnitario, 10 * 1.3 * 1.16);
 });
+
+test("INSUAMINCA: usa el neto exacto (importe ÷ cantidad), no el precio redondeado", () => {
+  // Pedido 01648617, AMOXICILINA: 20 u., Precio 0,95, Importe 19,08, Seg 7 %, ESC PRD 10 %.
+  const p = calcularPreciosLinea(
+    { PRECIO_USD: 0.95, Neto_USD: 19.08 / 20, DC: 7, DD: 10, DL: 0, cantidad: 20 },
+    sinTasa,
+    30
+  );
+  cerca(p.costoTotal, 19.08);
+  cerca(p.costoListaUnitario, 0.954 / (0.93 * 0.9));
+  cerca(p.ventaConDescuentoUnitario, (0.954 / 0.93) * 1.3);
+});

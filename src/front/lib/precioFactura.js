@@ -19,8 +19,10 @@
  *   Todos los descuentos (DC/DD/DL/DV) se trasladan. Columna "costo" de la
  *   hoja = PRECIO_BS; "Descuento" = el descuento de la línea.
  *
- * - INSUAMINCA ("Pedido de cliente"): el precio ya trae todos los descuentos
- *   aplicados. El precio de lista se reconstruye revirtiendo Seg (DC, el 7 %
+ * - INSUAMINCA ("Pedido de cliente", en US$): el precio ya trae todos los
+ *   descuentos aplicados. Como la columna "Precio" del PDF viene redondeada a
+ *   2 decimales (0,95 para un importe de 19,08 / 20 = 0,954), el costo se
+ *   toma de Neto_USD (importe ÷ cantidad) cuando existe. El precio de lista se reconstruye revirtiendo Seg (DC, el 7 %
  *   fijo de la farmacia), ESC PRD (DD), ESC PRV (DL) y DESC PRV (DV). Al
  *   cliente solo se le trasladan los del distribuidor (DD/DL/DV): Seg queda
  *   como ganancia de la farmacia. En la hoja: M = E / ((1−G)(1−H)(1−I)),
@@ -41,7 +43,7 @@ const DESCUENTOS = ["DC", "DD", "DL", "DV"];
 
 const REGLAS_POR_FORMATO = {
   nena: { precioEsLista: true, propios: [], trasladables: DESCUENTOS },
-  insuaminca: { precioEsLista: false, propios: ["DC"], trasladables: ["DD", "DL", "DV"] },
+  insuaminca: { precioEsLista: false, costoDesdeNeto: true, propios: ["DC"], trasladables: ["DD", "DL", "DV"] },
 };
 
 const REGLA_SIN_CONFIRMAR = { precioEsLista: false, propios: [], trasladables: [] };
@@ -63,6 +65,7 @@ function precioUsdUnitario(medicamento, factura, regla) {
   // En Nena PRECIO_BS es el precio de lista impreso en la factura; se
   // prefiere a PRECIO_USD para que el resultado coincida con la hoja.
   if (regla.precioEsLista && desdeBs !== null) return desdeBs;
+  if (regla.costoDesdeNeto && medicamento.Neto_USD != null) return Number(medicamento.Neto_USD) || 0;
   if (medicamento.PRECIO_USD != null) return Number(medicamento.PRECIO_USD) || 0;
   return desdeBs;
 }
