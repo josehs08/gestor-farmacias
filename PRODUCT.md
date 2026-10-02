@@ -28,9 +28,9 @@ Automates extraction from a specific fixed-column supplier invoice PDF layout di
 ## Capabilities and Constraints
 
 - Venezuela's bolívar/USD dual-currency pricing is a permanent product constraint, not incidental — invoice and inventory data always carries both Bs and USD figures, and the exchange-rate lookup is pinned to the Venezuelan dolarapi.com endpoint.
-- The invoice PDF parser (`extraer_informacion_medicamentos`) currently assumes one fixed-column supplier layout. Supporting additional supplier invoice formats is an anticipated near-term need, not yet built.
-- No authentication/authorization exists yet; the app assumes trusted internal use by pharmacy staff.
-- No test suite and no `requirements.txt` for the backend (see CLAUDE.md for setup gaps).
+- The invoice parser (`extraer_informacion_medicamentos`) supports three supplier layouts (Nena, INSUAMINCA, GUILLER MAR); each new supplier needs its own extractor and, for pricing, its own rule in `src/front/lib/precioFactura.js`.
+- Sale-price rules come from the pharmacy's spreadsheets: list price + 30 % markup (default) + IVA 16 % unless exempt, with the distributor discounts optionally passed on to the customer. GUILLER MAR has no confirmed rule yet.
+- Only the `/admin` panel is password-protected; the rest of the API assumes trusted internal use by pharmacy staff.
 
 ## Brand Commitments
 
@@ -38,7 +38,7 @@ None. No specific pharmacy business name or brand identity is attached yet — t
 
 ## Evidence on Hand
 
-No sample invoices, real business data, or brand assets were shared. The current parsing regex in `src/back/utils.py` and the `Medicina` model's column set (ALIC, DC/DD/DL/DV, Neto_Bs/Neto_USD, etc.) are the only concrete evidence of the real invoice format in use.
+The pharmacy's own pricing spreadsheets (PEDIDOS_DROGUERIA_NENA_2025, precios_Vitalclinic_2025, DROG_INSUAMINCA) were reviewed to derive the sale-price rules; they are not stored in the repo. The extractors in `src/back/utils.py` encode the known invoice layouts. No brand assets were shared.
 
 ## Product Principles
 

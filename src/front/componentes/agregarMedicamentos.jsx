@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
 const AgregarMedicamentos = ({ uploadId }) => {
@@ -16,9 +16,10 @@ const AgregarMedicamentos = ({ uploadId }) => {
           method: "POST",
         }
       );
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (response.ok) {
-        setMessage(data.message || "Medicamentos extraídos.");
+        const cantidad = data.medicamentos?.length ?? 0;
+        setMessage(`${cantidad} medicamento${cantidad === 1 ? "" : "s"} extraído${cantidad === 1 ? "" : "s"}.`);
         setIsError(false);
       } else {
         setMessage(data.error || "No se pudieron extraer los medicamentos.");

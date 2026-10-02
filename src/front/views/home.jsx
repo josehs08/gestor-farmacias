@@ -1,4 +1,3 @@
-import * as React from "react";
 import { Link } from "react-router-dom";
 import { Plate, PlateFiscalHeader } from "@/components/ui/plate";
 import { WorkSurface } from "../componentes/workSurface.jsx";

@@ -1,4 +1,3 @@
-import React from "react";
 import { cn } from "@/lib/utils";
 
 // The shared first-viewport composition for a work surface: one long ticket
