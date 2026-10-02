@@ -1,10 +1,14 @@
 import React, { useState } from "react";
-import { Button } from "../../components/ui/button";
+import { Button } from "@/components/ui/button";
 
 const AgregarMedicamentos = ({ uploadId }) => {
   const [message, setMessage] = useState("");
+  const [isError, setIsError] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleAddMedicamentos = async () => {
+    setIsLoading(true);
+    setMessage("");
     try {
       const response = await fetch(
         `${import.meta.env.VITE_APP_API_URL}/medicina/${uploadId}`,
@@ -14,19 +18,30 @@ const AgregarMedicamentos = ({ uploadId }) => {
       );
       const data = await response.json();
       if (response.ok) {
-        setMessage(data.message);
+        setMessage(data.message || "Medicamentos extraídos.");
+        setIsError(false);
       } else {
-        setMessage(data.error);
+        setMessage(data.error || "No se pudieron extraer los medicamentos.");
+        setIsError(true);
       }
-    } catch (error) {
-      setMessage("Error adding medications");
+    } catch {
+      setMessage("Error al extraer los medicamentos.");
+      setIsError(true);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div>
-      <Button onClick={handleAddMedicamentos}>Agregar</Button>
-      {message && <p>{message}</p>}
+    <div className='flex flex-col items-start gap-1'>
+      <Button onClick={handleAddMedicamentos} disabled={isLoading} size='sm' variant='outline'>
+        {isLoading ? "Extrayendo…" : "Extraer medicamentos"}
+      </Button>
+      {message && (
+        <p className={`text-xs ${isError ? "text-destructive" : "text-muted-foreground"}`}>
+          {message}
+        </p>
+      )}
     </div>
   );
 };

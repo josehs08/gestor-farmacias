@@ -1,8 +1,12 @@
-import React from "react";
-import { Button } from "../../components/ui/button";
+import React, { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
-export const DescargarExcel = ({ tipo }) => {
+export const DescargarExcel = ({ tipo, className }) => {
+  const [isLoading, setIsLoading] = useState(false);
+
   const handleDownload = async () => {
+    setIsLoading(true);
     try {
       const response = await fetch(
         `${import.meta.env.VITE_APP_API_URL}/descargar/${tipo}`,
@@ -17,17 +21,19 @@ export const DescargarExcel = ({ tipo }) => {
       document.body.appendChild(link);
       link.click(); // Simular el clic para descargar
       document.body.removeChild(link); // Eliminar el enlace temporal
-
-      alert("Archivo descargado con éxito");
     } catch (error) {
       console.error("Error de descarga:", error);
       alert("Error descargando el archivo");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div>
-      <Button onClick={handleDownload}>Descargar</Button>
-    </div>
+    <Button onClick={handleDownload} variant='outline' disabled={isLoading} className={cn("w-full", className)}>
+      {isLoading ? "Descargando…" : "Descargar Excel"}
+    </Button>
   );
 };
+
+export default DescargarExcel;

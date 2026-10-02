@@ -1,0 +1,11 @@
+flask
+flask-cors
+flask-sqlalchemy
+flask-admin
+python-dotenv
+pandas
+openpyxl
+PyPDF2
+pdfplumber
+requests
+psycopg2-binary

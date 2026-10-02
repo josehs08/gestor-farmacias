@@ -1,7 +1,10 @@
 import React, { useState } from "react";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/Button";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 
+// Lives in the action column, stacked under "Subir factura" — no longer its
+// own paper panel above the ticket.
 export const UploadPDFByUrl = () => {
   const [pdfUrl, setPdfUrl] = useState("");
   const [pdfContent, setPdfContent] = useState(null);
@@ -15,7 +18,7 @@ export const UploadPDFByUrl = () => {
 
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_APP_API_URL}/factura`,
+        `${import.meta.env.VITE_APP_API_URL}/facturaurl`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -28,7 +31,7 @@ export const UploadPDFByUrl = () => {
         setPdfContent(data.content); // Mostrar el contenido del PDF si se extrajo
         alert("PDF procesado correctamente.");
       } else {
-        alert("Error procesando el PDF.");
+        alert(data.error || "Error procesando el PDF.");
       }
     } catch (error) {
       console.error("Error:", error);
@@ -37,26 +40,31 @@ export const UploadPDFByUrl = () => {
   };
 
   return (
-    <div>
-      <form
-        onSubmit={handleSubmit}
-        style={{ display: "flex", gap: "10px", alignItems: "center" }}
-      >
+    <div className='flex min-w-0 flex-col gap-2'>
+      <p className='font-mono text-[0.65rem] uppercase tracking-wide text-muted-foreground'>
+        o por URL
+      </p>
+      <form onSubmit={handleSubmit} className='flex min-w-0 flex-col gap-2'>
+        <Label htmlFor='pdf-url'>URL del PDF</Label>
         <Input
+          id='pdf-url'
           type='url'
-          placeholder='Ingrese la URL del PDF'
+          placeholder='https://…'
           value={pdfUrl}
           onChange={(e) => setPdfUrl(e.target.value)}
           required
-          style={{ width: "300px" }}
         />
-        <Button type='submit'>Procesar PDF</Button>
+        <Button type='submit' variant='outline' className='w-full'>
+          Procesar PDF
+        </Button>
       </form>
 
       {pdfContent && (
-        <div>
-          <h3>Contenido Extraído:</h3>
-          <pre style={{ whiteSpace: "pre-wrap", maxWidth: "600px" }}>
+        <div className='min-w-0 border border-dashed border-border bg-muted/40 p-2'>
+          <h3 className='font-mono text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+            Contenido extraído
+          </h3>
+          <pre className='mt-1 max-h-40 min-w-0 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground'>
             {pdfContent}
           </pre>
         </div>

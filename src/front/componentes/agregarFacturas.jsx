@@ -1,11 +1,10 @@
 import React, { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/Button";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -32,33 +31,42 @@ const AgregarFacturas = () => {
         }
       );
       if (response.ok) {
-        alert("File uploaded successfully");
+        alert("Factura subida correctamente");
       } else {
-        alert("Error uploading file");
+        const data = await response.json().catch(() => ({}));
+        alert(data.error || "Error al subir la factura");
       }
     } catch (error) {
       console.log(error);
-      alert("Error uploading file");
+      alert("Error al subir la factura");
     }
   };
 
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button>Agregar Factura</Button>
+        <Button className='w-full' size='lg'>
+          Subir factura
+        </Button>
       </DialogTrigger>
-      <DialogContent className='sm:max-w-[425px]'>
+      <DialogContent className='w-[calc(100%-2rem)] sm:max-w-[425px]'>
+        <DialogHeader>
+          <DialogTitle>Subir factura</DialogTitle>
+        </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className='grid w-full max-w-sm items-center gap-1.5'>
-            <Label htmlFor='file'>Introduce tu factura:</Label>
+            <Label htmlFor='file'>Selecciona el PDF de la factura</Label>
             <Input
               name='file'
               type='file'
               id='file'
+              accept='application/pdf'
               onChange={handleFileChange}
             />
-            <Button type='submit'>Submit</Button>
           </div>
+          <DialogFooter className='mt-4'>
+            <Button type='submit'>Subir</Button>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
