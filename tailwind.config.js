@@ -8,7 +8,18 @@ export default {
   theme: {
   	extend: {
   		colors: {
-  			customPurple: '#6136fd',
+  			desk: '#d9d7cf',
+  			paper: '#f4f3ee',
+  			ink: '#1a1a1a',
+  			thermal: '#6b6b6b',
+  			action: {
+  				DEFAULT: '#1e5bd8',
+  				dark: '#5b90ff'
+  			},
+  			tape: {
+  				DEFAULT: '#c8321e',
+  				dark: '#f16852'
+  			},
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
   			card: {
@@ -52,8 +63,12 @@ export default {
   		},
   		borderRadius: {
   			lg: 'var(--radius)',
-  			md: 'calc(var(--radius) - 2px)',
-  			sm: 'calc(var(--radius) - 4px)'
+  			md: '1px',
+  			sm: '0px'
+  		},
+  		fontFamily: {
+  			sans: ['"Hanken Grotesk"', 'system-ui', 'sans-serif'],
+  			mono: ['"Azeret Mono"', 'ui-monospace', 'monospace']
   		}
   	}
   },

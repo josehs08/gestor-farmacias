@@ -1,44 +1,86 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, after_this_request, Response
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
-from sqlalchemy.orm import sessionmaker
 from io import BytesIO
+import hmac
 import os
-from src.back.utils import extraer_datos_factura_pdf, extraer_informacion_medicamentos, extraer_texto_pdf
-from flask_admin import Admin
+import tempfile
+from src.back.utils import extraer_datos_factura_pdf, extraer_informacion_medicamentos, validar_url_publica
+from flask_admin import Admin, AdminIndexView
 from flask_admin.contrib.sqla import ModelView
 from dotenv import load_dotenv
 import pandas as pd
 import requests
 
+load_dotenv()
+
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///database.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('FLASK_KEY') 
+app.config['SECRET_KEY'] = os.getenv('FLASK_KEY')
 db = SQLAlchemy(app)
 
-CORS(app)
+CORS(app, origins=[o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()])
+
+
+def _credenciales_admin_validas(auth):
+    """Compara las credenciales HTTP Basic contra ADMIN_USER/ADMIN_PASSWORD.
+    Si ADMIN_PASSWORD no está configurado, el panel se deniega siempre."""
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    if not admin_password or auth is None:
+        return False
+    usuario_ok = hmac.compare_digest(auth.username or "", os.getenv("ADMIN_USER", ""))
+    password_ok = hmac.compare_digest(auth.password or "", admin_password)
+    return usuario_ok and password_ok
+
+
+def _admin_acceso_denegado():
+    return Response(
+        "Acceso no autorizado",
+        401,
+        {"WWW-Authenticate": 'Basic realm="admin"'},
+    )
+
+
+class SecureModelView(ModelView):
+    def is_accessible(self):
+        return _credenciales_admin_validas(request.authorization)
+
+    def inaccessible_callback(self, name, **kwargs):
+        return _admin_acceso_denegado()
+
+
+class SecureAdminIndexView(AdminIndexView):
+    def is_accessible(self):
+        return _credenciales_admin_validas(request.authorization)
+
+    def inaccessible_callback(self, name, **kwargs):
+        return _admin_acceso_denegado()
 
 class Recipe(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     numero_factura = db.Column(db.String, nullable=True)
     fecha = db.Column(db.String, nullable=True)
     tipo_de_cambio = db.Column(db.String, nullable=True)
+    drogueria = db.Column(db.String, nullable=True)
     file = db.Column(db.LargeBinary, nullable=False)
     texto = db.Column(db.String, nullable=True)
 
-    def serialize(self):
-        return {
+    def serialize(self, include_texto=True):
+        data = {
             'id': self.id,
             'numero_factura': self.numero_factura,
             'fecha': self.fecha,
             'tipo_de_cambio': self.tipo_de_cambio,
-            'texto': self.texto
+            'drogueria': self.drogueria,
         }
-    
+        if include_texto:
+            data['texto'] = self.texto
+        return data
+
 class Medicina(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    id_factura = db.Column(db.Integer, db.ForeignKey('recipe.id'), nullable=True)
     cantidad = db.Column(db.Integer, nullable=True)
     codigo = db.Column(db.String, nullable=True)
     descripcion = db.Column(db.String, nullable=True)
@@ -47,6 +89,7 @@ class Medicina(db.Model):
     exp = db.Column(db.String, nullable=True)
     ALIC = db.Column(db.String, nullable=True)
     PRECIO_BS = db.Column(db.Float, nullable=True)
+    PRECIO_USD = db.Column(db.Float, nullable=True)
     DC = db.Column(db.Integer, nullable=True)
     DD = db.Column(db.Integer, nullable=True)
     DL = db.Column(db.Integer, nullable=True)
@@ -59,6 +102,7 @@ class Medicina(db.Model):
     def serialize(self):
         return {
             'id': self.id,
+            'id_factura': self.id_factura,
             'cantidad': self.cantidad,
             'codigo': self.codigo,
             'descripcion': self.descripcion,
@@ -67,6 +111,7 @@ class Medicina(db.Model):
             'exp': self.exp,
             'ALIC': self.ALIC,
             'PRECIO_BS': self.PRECIO_BS,
+            'PRECIO_USD': self.PRECIO_USD,
             'DC': self.DC,
             'DD': self.DD,
             'DL': self.DL,
@@ -77,47 +122,62 @@ class Medicina(db.Model):
             'TOT_NETO_USD': self.TOT_NETO_USD
         }
         
-class Factura(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    numero = db.Column(db.String, nullable=False)
-    fecha = db.Column(db.String, nullable=False)
-    precio_dolar = db.Column(db.String, nullable=False)
-    
 with app.app_context():
     db.create_all()
     db.session.commit()
 
-admin = Admin(app, name="Panel de Administración", template_mode="bootstrap4")
-admin.add_view(ModelView(Recipe, db.session))
-admin.add_view(ModelView(Medicina, db.session))
-
-@app.route("/")
-def hello_world():
-    return "<p>Hello, World!</p>"
+admin = Admin(
+    app,
+    name="Panel de Administración",
+    template_mode="bootstrap4",
+    index_view=SecureAdminIndexView(),
+)
+admin.add_view(SecureModelView(Recipe, db.session))
+admin.add_view(SecureModelView(Medicina, db.session))
 
 @app.route('/facturas', methods=['GET'])
 def facturas():
     facturas = Recipe.query.all()
-    data = list(map(lambda x: x.serialize(), facturas))
+    data = list(map(lambda x: x.serialize(include_texto=False), facturas))
     return jsonify(data)
 
-@app.route("/factura", methods=['POST'])
-def factura():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
+@app.route('/droguerias', methods=['GET'])
+def droguerias():
+    """Lista las droguerías con al menos una factura, para armar la vista de
+    medicamentos por proveedor sin traer todos los medicamentos de una vez."""
+    valores = db.session.query(Recipe.drogueria).filter(Recipe.drogueria.isnot(None)).distinct().all()
+    return jsonify(sorted(v[0] for v in valores if v[0]))
 
-    file_stream = BytesIO(file.read())
-    extracted_data = extraer_datos_factura_pdf(file_stream)
+def _buscar_factura_duplicada(numero_factura, drogueria, file_bytes):
+    """Una factura es la misma si coincide el número dentro de la misma
+    droguería (distintas droguerías pueden repetir numeración) o, cuando no
+    se pudo leer el número, si es exactamente el mismo archivo."""
+    if numero_factura:
+        return Recipe.query.filter_by(numero_factura=numero_factura, drogueria=drogueria).first()
+    return Recipe.query.filter_by(file=file_bytes).first()
+
+
+def _guardar_factura(file_bytes):
+    """Extrae los datos de una factura en PDF y la persiste. Compartido por
+    /factura (subida directa) y /facturaurl (descarga remota)."""
+    extracted_data = extraer_datos_factura_pdf(BytesIO(file_bytes))
 
     if not extracted_data:
         return jsonify({'error': 'No se pudo extraer información del PDF'}), 400
 
+    duplicada = _buscar_factura_duplicada(
+        extracted_data.get('numero_factura'), extracted_data.get('drogueria'), file_bytes
+    )
+    if duplicada:
+        return jsonify({
+            'error': 'Esta factura ya fue cargada',
+            'factura_id': duplicada.id,
+        }), 409
+
     numero_factura = extracted_data.get('numero_factura')
     fecha = extracted_data.get('fecha')
     tipo_de_cambio = extracted_data.get('tipo_de_cambio')
+    drogueria = extracted_data.get('drogueria')
     texto = extracted_data.get('texto')
 
     # Crear instancia de la factura
@@ -125,8 +185,9 @@ def factura():
         numero_factura=numero_factura,
         fecha=fecha,
         tipo_de_cambio=tipo_de_cambio,
+        drogueria=drogueria,
         texto=texto,
-        file=file.read()  # Guardar el archivo en binario
+        file=file_bytes  # Guardar el archivo en binario
     )
 
     try:
@@ -140,14 +201,39 @@ def factura():
         db.session.close()
 
 
+@app.route("/factura", methods=['POST'])
+def factura():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+
+    file_bytes = file.read()
+    return _guardar_factura(file_bytes)
+
+
 @app.route('/factura/<upload_id>', methods=['GET'])
 def download(upload_id):
     upload = Recipe.query.filter_by(id=upload_id).first()
-    return send_file(BytesIO(upload.file), download_name=upload.name, as_attachment=True)
+    if not upload:
+        return jsonify({'error': 'Factura not found'}), 404
+    filename = f"factura_{upload.numero_factura or upload.id}.pdf"
+    return send_file(BytesIO(upload.file), download_name=filename, as_attachment=True)
 
 @app.route("/medicina", methods=['GET'])
 def medicina():
-    medicinas = Medicina.query.all()
+    drogueria = request.args.get('drogueria')
+    query = Medicina.query
+    if drogueria:
+        query = query.join(Recipe, Medicina.id_factura == Recipe.id).filter(Recipe.drogueria == drogueria)
+    medicinas = query.all()
+    response = list(map(lambda x: x.serialize(), medicinas))
+    return jsonify(response)
+
+@app.route("/medicina/<idFactura>", methods=['GET'])
+def medicinaPorFactura(idFactura):
+    medicinas = Medicina.query.filter_by(id_factura=idFactura).all()
     response = list(map(lambda x: x.serialize(), medicinas))
     return jsonify(response)
 
@@ -156,10 +242,16 @@ def addMedicina(idFactura):
     data = Recipe.query.filter_by(id=idFactura).first()
     if not data:
         return jsonify({'error': 'Factura not found'}), 404
-    medicinas = extraer_informacion_medicamentos(data.texto)
+    if Medicina.query.filter_by(id_factura=idFactura).first():
+        return jsonify({'error': 'Esta factura ya fue procesada'}), 409
+    medicinas = extraer_informacion_medicamentos(data.texto, data.file)
+    if not medicinas:
+        # Sin ítems no se guarda nada, así la factura queda disponible para
+        # reintentar cuando se ajuste el extractor de ese formato.
+        return jsonify({'error': 'No se encontraron medicamentos en la factura; revisá el formato del PDF'}), 422
     for medicina in medicinas:
-        print(medicina)
         medicina = Medicina(
+            id_factura=idFactura,
             cantidad=medicina.get('cantidad'),
             codigo=medicina.get('codigo'),
             descripcion=medicina.get('descripcion'),
@@ -168,6 +260,7 @@ def addMedicina(idFactura):
             exp=medicina.get('exp'),
             ALIC=medicina.get('ALIC'),
             PRECIO_BS=medicina.get('PRECIO_BS'),
+            PRECIO_USD=medicina.get('PRECIO_USD'),
             DC=medicina.get('DC'),
             DD=medicina.get('DD'),
             DL=medicina.get('DL'),
@@ -183,7 +276,7 @@ def addMedicina(idFactura):
         return jsonify({"medicamentos": list(map(lambda x: x, medicinas))}), 201
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 50
+        return jsonify({'error': str(e)}), 500
     
 def export_to_excel(model, filename, sheet_name):
     """Genera un archivo Excel con los datos de la tabla especificada."""
@@ -195,17 +288,27 @@ def export_to_excel(model, filename, sheet_name):
     df = pd.DataFrame(data)
 
     # Guardar en un archivo Excel temporal
-    file_path = f"C:\\Users\\Public\\{filename}"
+    file_path = os.path.join(tempfile.gettempdir(), filename)
     df.to_excel(file_path, sheet_name=sheet_name, index=False, engine="openpyxl")
 
     return file_path
+
+def _cleanup_after_response(file_path):
+    @after_this_request
+    def cleanup(response):
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
+        return response
 
 @app.route('/descargar/facturas')
 def download_recipes():
     """Endpoint para descargar la tabla Recipe en formato Excel."""
     filename = "recipes.xlsx"
     file_path = export_to_excel(Recipe, filename, "Recipes")
-    
+    _cleanup_after_response(file_path)
+
     return send_file(
         file_path,
         as_attachment=True,  # Fuerza la descarga
@@ -218,6 +321,7 @@ def download_recipes():
 def download_medicinas():
     filename = "medicinas.xlsx"
     file_path = export_to_excel(Medicina, filename, "Medicinas")
+    _cleanup_after_response(file_path)
 
     return send_file(
         file_path,
@@ -228,25 +332,35 @@ def download_medicinas():
 
 @app.route('/facturaurl', methods=['POST'])
 def procesar_pdf():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     pdf_url = data.get("url")
 
     if not pdf_url:
         return jsonify({"error": "No se proporcionó una URL"}), 400
 
+    es_valida, motivo = validar_url_publica(pdf_url)
+    if not es_valida:
+        return jsonify({"error": motivo}), 400
+
     try:
-        response = requests.get(pdf_url)
-        if response.status_code != 200:
-            return jsonify({"error": "No se pudo descargar el PDF"}), 400
-
-        file_path = f"/tmp/pdf_procesado.pdf"
-        with open(file_path, "wb") as f:
-            f.write(response.content)
-
-        return jsonify({"message": "PDF recibido correctamente", "file_path": file_path})
-
-    except Exception as e:
+        response = requests.get(pdf_url, timeout=10, stream=True, allow_redirects=False)
+    except requests.RequestException as e:
         return jsonify({"error": str(e)}), 500
+
+    if response.status_code != 200:
+        return jsonify({"error": "No se pudo descargar el PDF"}), 400
+
+    limite_bytes = 20 * 1024 * 1024
+    contenido = b""
+    for chunk in response.iter_content(chunk_size=8192):
+        contenido += chunk
+        if len(contenido) > limite_bytes:
+            return jsonify({"error": "El PDF supera el tamaño máximo permitido (20 MB)"}), 400
+
+    if not contenido.startswith(b"%PDF"):
+        return jsonify({"error": "El contenido descargado no es un PDF válido"}), 400
+
+    return _guardar_factura(contenido)
     
 @app.route('/precio/<nombre>', methods=['GET'])
 def precio(nombre):
@@ -256,4 +370,4 @@ def precio(nombre):
     return jsonify({"precios": [{"descripcion": med.descripcion, "precio": med.PRECIO_BS} for med in data]})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=os.getenv("FLASK_DEBUG") == "1")
