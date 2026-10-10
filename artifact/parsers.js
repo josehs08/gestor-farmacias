@@ -3,8 +3,10 @@
 // con su posición), así se prueban en Node sin pdf.js; solo leerPdf() lo usa.
 
 export const FORMATO_NENA = "nena";
+// INSUAMINCA emite dos documentos por la misma compra: el pedido ("Pedido de
+// cliente", en US$) y la factura ("FACTURA B…", en Bs y US$ con Tasa BCV).
 export const FORMATO_INSUAMINCA = "insuaminca";
-export const FORMATO_GUILLERMAR = "guillermar";
+export const FORMATO_INSUAMINCA_FACTURA = "insuaminca_factura";
 
 // --- Números -----------------------------------------------------------------
 
@@ -56,7 +58,8 @@ export function detectarFormato(texto) {
   if (!texto) return null;
   if (texto.includes("Número de Documento")) return FORMATO_NENA;
   if (texto.includes("Pedido de cliente")) return FORMATO_INSUAMINCA;
-  return FORMATO_GUILLERMAR;
+  if (/D\/1\s+D\/2\s+D\/3\s+D\/4\s+Prec U/.test(texto)) return FORMATO_INSUAMINCA_FACTURA;
+  return null; // formato que el lector no conoce
 }
 
 const grupo = (re, texto) => re.exec(texto)?.[1] ?? null;
@@ -83,13 +86,19 @@ export function parsearEncabezado(texto) {
       drogueria: grupo(/^(.+?)\s+RIF:/, texto)?.trim() ?? null,
     };
   }
-  return {
-    formato,
-    numero: grupo(/FACTURA\s+(\S+)/, texto),
-    fecha: grupo(/Fecha de Emisión:\s*(\d{2}\/\d{2}\/\d{4})/, texto),
-    tipoCambio: tasa(grupo(/Tasa BCV[\s\S]*?(\d{1,3}(?:\.\d{3})*,\d{2})/, texto)),
-    drogueria: grupo(/(\S+)\s+Unidades:/, texto)?.trim() ?? null,
-  };
+  if (formato === FORMATO_INSUAMINCA_FACTURA) {
+    // El pie dice solo "INSUAMINCA"; se unifica con la razón social del pedido.
+    const pie = grupo(/(\S+)\s+Unidades:/, texto)?.trim() ?? null;
+    return {
+      formato,
+      numero: grupo(/FACTURA\s+(\S+)/, texto),
+      fecha: grupo(/Fecha de Emisión:\s*(\d{2}\/\d{2}\/\d{4})/, texto),
+      tipoCambio: tasa(grupo(/Tasa BCV[\s\S]*?(\d{1,3}(?:\.\d{3})*,\d{2})/, texto)),
+      drogueria: pie?.toUpperCase().startsWith("INSUAMINCA") ? "INSUAMINCA, C.A." : pie,
+      pedido: grupo(/PEDIDO:\s*(\d+)/, texto),
+    };
+  }
+  return { formato, numero: null, fecha: null, tipoCambio: null, drogueria: null };
 }
 
 /** "18/09/2026" o "18-09-2026" → "2026-09-18", para ordenar por fecha. */
@@ -136,8 +145,8 @@ export function agruparPorFilas(palabras, tolerancia = 2) {
   return filas.map((fila) => fila.sort((a, b) => a.x0 - b.x0));
 }
 
-/** Formato GUILLER MAR: las últimas 12 columnas de cada fila son datos. */
-export function itemsGuillermar(paginas) {
+/** Factura INSUAMINCA: las últimas 12 columnas de cada fila son datos (D/1 = Seg). */
+export function itemsFacturaInsuaminca(paginas) {
   const items = [];
   for (const palabras of paginas) {
     for (const fila of agruparPorFilas(palabras)) {
@@ -257,7 +266,8 @@ export function parsearFactura(paginas) {
   let items;
   if (encabezado.formato === FORMATO_NENA) items = itemsNena(texto);
   else if (encabezado.formato === FORMATO_INSUAMINCA) items = itemsInsuaminca(palabras);
-  else items = itemsGuillermar(palabras);
+  else if (encabezado.formato === FORMATO_INSUAMINCA_FACTURA) items = itemsFacturaInsuaminca(palabras);
+  else items = [];
   return { ...encabezado, fechaIso: fechaIso(encabezado.fecha), items };
 }
 

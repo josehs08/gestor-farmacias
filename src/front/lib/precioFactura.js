@@ -19,17 +19,21 @@
  *   Todos los descuentos (DC/DD/DL/DV) se trasladan. Columna "costo" de la
  *   hoja = PRECIO_BS; "Descuento" = el descuento de la línea.
  *
- * - INSUAMINCA ("Pedido de cliente", en US$): el precio ya trae todos los
- *   descuentos aplicados. Como la columna "Precio" del PDF viene redondeada a
- *   2 decimales (0,95 para un importe de 19,08 / 20 = 0,954), el costo se
- *   toma de Neto_USD (importe ÷ cantidad) cuando existe. El precio de lista se reconstruye revirtiendo Seg (DC, el 7 %
- *   fijo de la farmacia), ESC PRD (DD), ESC PRV (DL) y DESC PRV (DV). Al
- *   cliente solo se le trasladan los del distribuidor (DD/DL/DV): Seg queda
- *   como ganancia de la farmacia. En la hoja: M = E / ((1−G)(1−H)(1−I)),
- *   N = M × 1,3 y P = N × (1−H)(1−I).
+ * - INSUAMINCA, en sus dos documentos: el pedido ("Pedido de cliente", en
+ *   US$) y la factura ("FACTURA B…", en Bs y US$ con la Tasa BCV). El precio
+ *   ya trae todos los descuentos aplicados. El precio de lista se reconstruye
+ *   revirtiendo Seg (DC / D/1, el 7 % fijo de la farmacia), ESC PRD (DD),
+ *   ESC PRV (DL) y DESC PRV (DV). Al cliente solo se le trasladan los del
+ *   distribuidor (DD/DL/DV): Seg queda como ganancia de la farmacia. En la
+ *   hoja: M = E / ((1−G)(1−H)(1−I)), N = M × 1,3 y P = N × (1−H)(1−I).
+ *   La hoja toma E en Bs de la factura y la divide por la Tasa BCV de esa
+ *   factura (columna DOLAR), así que en la factura el costo sale de
+ *   PRECIO_BS ÷ tasa. En el pedido, que solo trae US$ redondeados a 2
+ *   decimales (0,95 para un importe de 19,08 / 20 = 0,954), sale de
+ *   Neto_USD (importe ÷ cantidad).
  *
- * - Otros formatos (GUILLER MAR): sin hoja de referencia todavía. El precio
- *   se toma tal cual, sin revertir ni trasladar descuentos.
+ * - Formatos que el lector no reconoce: sin regla. El precio se toma tal
+ *   cual, sin revertir ni trasladar descuentos.
  *
  * El IVA sale de ALIC (16 % o 0 % para exentos "(E)"). Todo se expresa en
  * US$: si la línea solo trae precio en Bs se convierte con la tasa de la
@@ -41,12 +45,20 @@ export const MARGEN_VENTA_DEFAULT = 30;
 
 const DESCUENTOS = ["DC", "DD", "DL", "DV"];
 
+// `fuentes`: de dónde sale el precio unitario en US$, en orden de preferencia
+// ("bs" = PRECIO_BS ÷ tasa de la factura, "neto" = Neto_USD, "usd" = PRECIO_USD).
 const REGLAS_POR_FORMATO = {
-  nena: { precioEsLista: true, propios: [], trasladables: DESCUENTOS },
-  insuaminca: { precioEsLista: false, costoDesdeNeto: true, propios: ["DC"], trasladables: ["DD", "DL", "DV"] },
+  nena: { precioEsLista: true, fuentes: ["bs", "usd"], propios: [], trasladables: DESCUENTOS },
+  insuaminca: { precioEsLista: false, fuentes: ["neto", "usd", "bs"], propios: ["DC"], trasladables: ["DD", "DL", "DV"] },
+  insuaminca_factura: {
+    precioEsLista: false,
+    fuentes: ["bs", "neto", "usd"],
+    propios: ["DC"],
+    trasladables: ["DD", "DL", "DV"],
+  },
 };
 
-const REGLA_SIN_CONFIRMAR = { precioEsLista: false, propios: [], trasladables: [] };
+const REGLA_SIN_CONFIRMAR = { precioEsLista: false, fuentes: ["usd", "bs"], propios: [], trasladables: [] };
 
 export function obtenerReglaPrecios(factura) {
   return REGLAS_POR_FORMATO[factura?.formato] ?? REGLA_SIN_CONFIRMAR;
@@ -61,13 +73,13 @@ export function aplicarDescuentosEscalonados(precio, porcentajes) {
 
 function precioUsdUnitario(medicamento, factura, regla) {
   const tasa = Number(factura?.tipo_de_cambio);
-  const desdeBs = medicamento.PRECIO_BS != null && tasa > 0 ? Number(medicamento.PRECIO_BS) / tasa : null;
-  // En Nena PRECIO_BS es el precio de lista impreso en la factura; se
-  // prefiere a PRECIO_USD para que el resultado coincida con la hoja.
-  if (regla.precioEsLista && desdeBs !== null) return desdeBs;
-  if (regla.costoDesdeNeto && medicamento.Neto_USD != null) return Number(medicamento.Neto_USD) || 0;
-  if (medicamento.PRECIO_USD != null) return Number(medicamento.PRECIO_USD) || 0;
-  return desdeBs;
+  const valores = {
+    bs: medicamento.PRECIO_BS != null && tasa > 0 ? Number(medicamento.PRECIO_BS) / tasa : null,
+    neto: medicamento.Neto_USD != null ? Number(medicamento.Neto_USD) || 0 : null,
+    usd: medicamento.PRECIO_USD != null ? Number(medicamento.PRECIO_USD) || 0 : null,
+  };
+  const fuente = regla.fuentes.find((f) => valores[f] !== null);
+  return fuente ? valores[fuente] : null;
 }
 
 export function alicuotaIva(medicamento) {

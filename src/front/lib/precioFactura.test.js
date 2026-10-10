@@ -5,7 +5,7 @@ import { calcularPreciosLinea, calcularTotalesFactura } from "./precioFactura.js
 const cerca = (actual, esperado) =>
   assert.ok(Math.abs(actual - esperado) < 1e-6, `${actual} ≠ ${esperado}`);
 
-const otra = { drogueria: "GUILLER", formato: "guillermar", tipo_de_cambio: "40.0" };
+const otra = { drogueria: "Otra", formato: null, tipo_de_cambio: "40.0" };
 const sinTasa = { drogueria: "INSUAMINCA, C.A.", formato: "insuaminca", tipo_de_cambio: null };
 
 test("uses PRECIO_USD when present", () => {
@@ -112,4 +112,52 @@ test("INSUAMINCA: usa el neto exacto (importe ÷ cantidad), no el precio redonde
   cerca(p.costoTotal, 19.08);
   cerca(p.costoListaUnitario, 0.954 / (0.93 * 0.9));
   cerca(p.ventaConDescuentoUnitario, (0.954 / 0.93) * 1.3);
+});
+
+// --- Facturas reales (Archivo.zip) contra las fórmulas de las hojas ----------
+
+test("Nena real 65614200 (CANDESARTAN, exento, 15 %): venta según la hoja de Nena", () => {
+  // Hoja: E = costo × 1,3 / tasa; F = E × (1 − desc). Costo = PRECIO BS bruto.
+  const factura = { formato: "nena", tipo_de_cambio: "866.5612" };
+  const p = calcularPreciosLinea(
+    { PRECIO_BS: 5080.65, ALIC: "0.00", DC: 0, DD: 15, DL: 0, DV: 0, cantidad: 3 },
+    factura,
+    30
+  );
+  cerca(p.ventaSinDescuentoUnitario, (5080.65 * 1.3) / 866.5612);
+  cerca(p.ventaConDescuentoUnitario, ((5080.65 * 1.3) / 866.5612) * 0.85);
+  // La factura imprime el neto por unidad redondeado a céntimos (4.318,55).
+  assert.ok(Math.abs(p.costoTotal - 12955.65 / 866.5612) < 0.001);
+});
+
+test("Nena real 65614150 (RECOLECTOR, gravado 16 %, 4 %): suma IVA", () => {
+  const factura = { formato: "nena", tipo_de_cambio: "866.5612" };
+  const p = calcularPreciosLinea({ PRECIO_BS: 13000, ALIC: "16.00", DD: 4, cantidad: 1 }, factura, 30);
+  cerca(p.ventaSinDescuentoUnitario, (13000 * 1.3 * 1.16) / 866.5612);
+  cerca(p.ventaConDescuentoUnitario, ((13000 * 1.3 * 1.16) / 866.5612) * 0.96);
+});
+
+test("Factura INSUAMINCA real B0485399 (IBUPROFENO): igual que la hoja de INSUAMINCA", () => {
+  // Factura: Prec U 377,20 Bs, Tasa BCV 827,74, D/1 7 %. La hoja (24/09)
+  // tiene el mismo producto a 389,38 Bs con DOLAR 854,46: el precio en US$
+  // es el mismo (0,4557), y O = E / 0,93 × 1,3 / DOLAR = 0,637.
+  const factura = { formato: "insuaminca_factura", tipo_de_cambio: "827.74" };
+  const p = calcularPreciosLinea(
+    { PRECIO_BS: 377.2, PRECIO_USD: 0.46, Neto_USD: 0.456, ALIC: "0,00", DC: 7, DD: 0, DL: 0, DV: 0, cantidad: 10 },
+    factura,
+    30
+  );
+  cerca(p.costoUnitario, 377.2 / 827.74);
+  cerca(p.ventaSinDescuentoUnitario, (377.2 / 0.93) * 1.3 / 827.74);
+  cerca(p.ventaConDescuentoUnitario, (377.2 / 0.93) * 1.3 / 827.74);
+  assert.ok(Math.abs(p.ventaSinDescuentoUnitario - ((389.38 / 0.93) * 1.3) / 854.46) < 0.001);
+});
+
+test("Factura INSUAMINCA: un descuento del distribuidor (D/3) se traslada; el Seg no", () => {
+  // BISOPROLOL: 1.356,54 Bs, D/1 7 %, D/3 1 %.
+  const factura = { formato: "insuaminca_factura", tipo_de_cambio: "827.74" };
+  const p = calcularPreciosLinea({ PRECIO_BS: 1356.54, ALIC: "0,00", DC: 7, DD: 0, DL: 1, DV: 0, cantidad: 1 }, factura, 30);
+  const lista = 1356.54 / 827.74 / (0.93 * 0.99);
+  cerca(p.costoListaUnitario, lista);
+  cerca(p.ventaConDescuentoUnitario, lista * 1.3 * 0.99);
 });

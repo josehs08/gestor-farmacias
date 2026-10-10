@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   detectarFormato,
   fechaIso,
-  itemsGuillermar,
+  itemsFacturaInsuaminca,
   itemsInsuaminca,
   itemsNena,
   numeroFlexible,
@@ -17,7 +17,7 @@ import {
 
 const palabra = (text, x0, top) => ({ text, x0, top });
 
-const filaGuillermar = (descripcion, lote, top) => [
+const filaFacturaInsuaminca = (descripcion, lote, top) => [
   palabra(descripcion, 10, top),
   ...[lote, "12-2027", "2", "0", "0", "0", "0", "100,00", "1,00", "200,00", "2,00", "0"].map((c, i) =>
     palabra(c, 100 + i * 20, top)
@@ -76,13 +76,14 @@ test("encabezado Nena: tasa en cualquier formato", () => {
 test("detecta el formato y normaliza la fecha", () => {
   assert.equal(detectarFormato("Número de Documento: 1"), "nena");
   assert.equal(detectarFormato("INSUAMINCA, C.A. RIF: J-1\nPedido de cliente"), "insuaminca");
-  assert.equal(detectarFormato("FACTURA 0001"), "guillermar");
+  assert.equal(detectarFormato("FACTURA B0485399\nDescripción Lote Vence Cant. D/1 D/2 D/3 D/4 Prec U"), "insuaminca_factura");
+  assert.equal(detectarFormato("Un PDF de otra droguería"), null);
   assert.equal(fechaIso("18/09/2026"), "2026-09-18");
   assert.equal(fechaIso("01-02-2025"), "2025-02-01");
 });
 
-test("GUILLER MAR lee todas las páginas y el neto es unitario", () => {
-  const items = itemsGuillermar([[...filaGuillermar("ATAMEL", "L1", 100)], [...filaGuillermar("LORATADINA", "L2", 100)]]);
+test("factura INSUAMINCA lee todas las páginas y el neto es unitario", () => {
+  const items = itemsFacturaInsuaminca([[...filaFacturaInsuaminca("ATAMEL", "L1", 100)], [...filaFacturaInsuaminca("LORATADINA", "L2", 100)]]);
   assert.deepEqual(items.map((m) => m.descripcion), ["ATAMEL", "LORATADINA"]);
   assert.equal(items[0].Neto_Bs, 100);
   assert.equal(items[0].TOT_NETO_Bs, 200);
@@ -127,4 +128,26 @@ test("parsearFactura arma encabezado e ítems desde las páginas", () => {
   assert.equal(f.drogueria, "INSUAMINCA, C.A.");
   assert.equal(f.fechaIso, "2026-09-18");
   assert.equal(f.items.length, 1);
+});
+
+test("encabezado de la factura INSUAMINCA: tasa BCV, pedido y droguería unificada", () => {
+  const e = parsearEncabezado(
+    "FACTURA B0485399\nFecha de Emisión: 10/09/2026\nVendedor: X PEDIDO: 01625333(10/09/2026)\n" +
+      "Descripción Lote Vence Cant. D/1 D/2 D/3 D/4 Prec U Prec $ Imp Bs Imp $ IVA%\n" +
+      "INSUAMINCA Unidades: 31 Tasa BCV\nSICM 50863 Bultos: 1 827,74"
+  );
+  assert.deepEqual(e, {
+    formato: "insuaminca_factura",
+    numero: "B0485399",
+    fecha: "10/09/2026",
+    tipoCambio: 827.74,
+    drogueria: "INSUAMINCA, C.A.",
+    pedido: "01625333",
+  });
+});
+
+test("formato desconocido: sin ítems", () => {
+  const f = parsearFactura([{ lineas: ["Otra droguería"], palabras: [palabra("x", 1, 1)] }]);
+  assert.equal(f.formato, null);
+  assert.deepEqual(f.items, []);
 });

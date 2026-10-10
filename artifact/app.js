@@ -7,11 +7,11 @@ import { calcularPreciosLinea, calcularTotalesFactura, MARGEN_VENTA_DEFAULT } fr
 
 const PDFJS_BASE = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
 const XLSX_URL = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-const FORMATOS = { nena: "Nena", insuaminca: "INSUAMINCA", guillermar: "GUILLER MAR" };
+const FORMATOS = { nena: "Nena", insuaminca: "INSUAMINCA · pedido", insuaminca_factura: "INSUAMINCA · factura" };
 const DESCUENTOS = ["DC", "DD", "DL", "DV"];
 const ETIQUETAS_DESCUENTO = {
   insuaminca: { DC: "Seg", DD: "ESC PRD", DL: "ESC PRV", DV: "DESC PRV" },
-  guillermar: { DC: "D/1", DD: "D/2", DL: "D/3", DV: "D/4" },
+  insuaminca_factura: { DC: "D/1 Seg", DD: "D/2", DL: "D/3", DV: "D/4" },
 };
 const MAX_RESULTADOS = 100;
 
@@ -266,7 +266,7 @@ function tarjetaCarga() {
         <input type="file" id="archivo" accept="application/pdf,.pdf">
         <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0-4 4m4-4 4 4M5 20h14" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
         <strong>Arrastra el PDF de la factura</strong>
-        <span class="tenue">o toca para elegirlo · Nena, INSUAMINCA o GUILLER MAR</span>
+        <span class="tenue">o toca para elegirlo · Nena o INSUAMINCA (factura o pedido)</span>
       </label>`;
   }
   return `
@@ -340,8 +340,7 @@ function guiaPrecios() {
           <dt>Venta</dt><dd>precio de lista × (1 + ${fmtPct(margen())}) × (1 + IVA)</dd>
           <dt>Con desc.</dt><dd>la venta menos los descuentos del distribuidor</dd>
           <dt>Nena</dt><dd>el precio impreso es el de lista; IVA 16 % salvo exentos (E)</dd>
-          <dt>INSUAMINCA</dt><dd>el precio ya trae los descuentos; el Seg (7 %) queda para la farmacia</dd>
-          <dt>GUILLER MAR</dt><dd>sin regla confirmada: precio tal cual, más ganancia e IVA</dd>
+          <dt>INSUAMINCA</dt><dd>el precio ya trae los descuentos; el Seg (7 %, D/1) queda para la farmacia. En la factura el costo es Prec U Bs ÷ Tasa BCV</dd>
         </dl>
         <p class="tenue" style="margin:0">El % de ganancia y la tasa del día se cambian en Ajustes.</p>
       </div>
@@ -434,6 +433,11 @@ function detalleFactura(f) {
     </section>`;
 }
 
+/** El pedido de INSUAMINCA que esta factura cierra, si ya se cargó. */
+function pedidoCargado(d) {
+  return d.pedido ? estado.facturas.find((f) => f.formato === FORMATO_INSUAMINCA && f.numero === d.pedido) : null;
+}
+
 function vistaBorrador() {
   const b = estado.borrador;
   const d = b.datos;
@@ -455,6 +459,11 @@ function vistaBorrador() {
         </div>
         ${sinTasa ? `<div class="aviso error">Esta factura no trae tasa legible: sin ella los precios en Bs no se pueden pasar a US$.</div>` : ""}
         ${!d.items.length ? `<div class="aviso error">No se encontraron ítems. Puede que esta droguería use un formato que el lector todavía no conoce.</div>` : ""}
+        ${
+          pedidoCargado(d)
+            ? `<div class="aviso">El pedido ${esc(d.pedido)} de esta factura ya está cargado: sus productos saldrán dos veces en Precios. <button class="btn" data-abrir="${esc(pedidoCargado(d).id)}">Ver el pedido</button></div>`
+            : ""
+        }
         ${b.duplicadaId ? `<div class="aviso error">Esta factura ya está cargada. <button class="btn" data-abrir="${esc(b.duplicadaId)}">Ver la guardada</button></div>` : ""}
         ${b.mensaje && b.fase !== "error" ? `<div class="aviso">${esc(b.mensaje)}</div>` : ""}
         <div class="acciones">
@@ -607,6 +616,7 @@ async function guardarBorrador() {
     fecha: d.fechaIso ? fechaCorta(d.fechaIso) : d.fecha,
     formato: d.formato,
     tipoCambio: Number(d.tipoCambio) > 0 ? Number(d.tipoCambio) : null,
+    pedido: d.pedido ?? null,
     items: d.items,
   };
   estado.borrador = { ...b, fase: "guardando", duplicadaId: null, mensaje: null };

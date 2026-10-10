@@ -116,20 +116,29 @@ def _tasa_a_texto(valor):
 
 
 FORMATO_NENA = "nena"
+# INSUAMINCA emite dos documentos por la misma compra: el pedido ("Pedido de
+# cliente", solo en US$) y la factura ("FACTURA B...", en Bs y US$ con la
+# Tasa BCV del día). FARMACIA GUILLER MAR, que aparece en ambos, es el
+# cliente (la farmacia), no la droguería.
 FORMATO_INSUAMINCA = "insuaminca"
-FORMATO_GUILLERMAR = "guillermar"
+FORMATO_INSUAMINCA_FACTURA = "insuaminca_factura"
+
+_COLUMNAS_INSUAMINCA_FACTURA = re.compile(r"D/1\s+D/2\s+D/3\s+D/4\s+Prec U")
 
 
 def detectar_formato(texto):
     """Identifica el formato de factura (y con él la regla de precios que usa
-    el frontend) a partir del texto extraído del PDF."""
+    el frontend) a partir del texto extraído del PDF. None = formato que el
+    lector no conoce."""
     if not texto:
         return None
     if "Número de Documento" in texto:
         return FORMATO_NENA
     if "Pedido de cliente" in texto:
         return FORMATO_INSUAMINCA
-    return FORMATO_GUILLERMAR
+    if _COLUMNAS_INSUAMINCA_FACTURA.search(texto):
+        return FORMATO_INSUAMINCA_FACTURA
+    return None
 
 
 def parsear_encabezado_factura(texto):
@@ -155,26 +164,31 @@ def parsear_encabezado_factura(texto):
         # El proveedor (droguería) es la razón social con la que abre el PDF,
         # justo antes de su "RIF:" (ej. "INSUAMINCA, C.A. RIF: J-...").
         drogueria = re.search(r"^(.+?)\s+RIF:", texto)
-    else:
-        # Formato "FACTURA <numero>" (ej. proveedor GUILLER MAR): sin "Número de
-        # Documento", fecha con "/" y sin "Tipo de Cambio (USA $)" explícito —
-        # el tipo de cambio viene como "Tasa BCV" y su valor cae en la línea
-        # siguiente por cómo el PDF ubica esa columna.
+    elif formato == FORMATO_INSUAMINCA_FACTURA:
+        # Factura de INSUAMINCA ("FACTURA B0485399"): fecha con "/" y el tipo
+        # de cambio como "Tasa BCV", cuyo valor cae en la línea siguiente por
+        # cómo el PDF ubica esa columna.
         numero_factura = re.search(r"FACTURA\s+(\S+)", texto)
         fecha = re.search(r"Fecha de Emisión:\s*(\d{2}/\d{2}/\d{4})", texto)
         tasa_bcv = re.search(r"Tasa BCV.*?(\d{1,3}(?:\.\d{3})*,\d{2})", texto, re.DOTALL)
         tipo_de_cambio_valor = _tasa_a_texto(tasa_bcv.group(1)) if tasa_bcv else None
-        # Este formato no imprime el nombre de la droguería como texto en
-        # ningún encabezado (el logo es una imagen); el único identificador
-        # de texto disponible es el código pegado antes de "Unidades:".
+        # El logo es una imagen: el único nombre en texto es el que va pegado
+        # antes de "Unidades:" en el pie.
         drogueria = re.search(r"(\S+)\s+Unidades:", texto)
+    else:
+        numero_factura = fecha = drogueria = tipo_de_cambio_valor = None
 
-    return {
+    resultado = {
         "numero_factura": numero_factura.group(1) if numero_factura else None,
         "fecha": fecha.group(1) if fecha else None,
         "tipo_de_cambio": tipo_de_cambio_valor,
         "drogueria": drogueria.group(1).strip() if drogueria else None,
     }
+    # El pie de la factura dice solo "INSUAMINCA"; se unifica con la razón
+    # social del pedido para que ambos documentos queden bajo la misma droguería.
+    if formato == FORMATO_INSUAMINCA_FACTURA and (resultado["drogueria"] or "").upper().startswith("INSUAMINCA"):
+        resultado["drogueria"] = "INSUAMINCA, C.A."
+    return resultado
 
 
 def extraer_datos_factura_pdf(file):
@@ -198,7 +212,7 @@ def extraer_informacion_medicamentos(texto, pdf_bytes=None):
         return []
     if formato == FORMATO_INSUAMINCA:
         return _extraer_medicamentos_insuaminca(pdf_bytes)
-    return _extraer_medicamentos_guillermar(pdf_bytes)
+    return _extraer_medicamentos_insuaminca_factura(pdf_bytes)
 
 
 def _extraer_medicamentos_legacy(texto):
@@ -248,10 +262,10 @@ def _agrupar_por_filas(words, tolerancia=2.0):
     return filas
 
 
-def _extraer_medicamentos_guillermar(pdf_bytes):
-    """Factura tipo GUILLER MAR: columnas Descripción Lote Vence Cant. D/1 D/2
+def _extraer_medicamentos_insuaminca_factura(pdf_bytes):
+    """Factura de INSUAMINCA: columnas Descripción Lote Vence Cant. D/1 D/2
     D/3 D/4 Prec U Prec $ Imp Bs Imp $ IVA%, leídas por posición (ver
-    _agrupar_por_filas)."""
+    _agrupar_por_filas). D/1 es el Seg (7 %) del pedido."""
     medicamentos = []
     with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
         filas = [

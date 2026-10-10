@@ -36,7 +36,7 @@ def _fake_pdfplumber(monkeypatch, paginas):
     monkeypatch.setattr(utils.pdfplumber, "open", lambda _f: _PdfPlumber(paginas))
 
 
-def _fila_guillermar(descripcion, lote, top):
+def _fila_insuaminca_factura(descripcion, lote, top):
     columnas = [lote, "12-2027", "2", "0", "0", "0", "0",
                 "100,00", "1,00", "200,00", "2,00", "0"]
     palabras = [_palabra(descripcion, 10, top)]
@@ -66,13 +66,13 @@ def _encabezado_insuaminca(top):
 
 # --- Multi-page extraction --------------------------------------------------
 
-def test_guillermar_lee_todas_las_paginas(monkeypatch):
+def test_insuaminca_factura_lee_todas_las_paginas(monkeypatch):
     _fake_pdfplumber(monkeypatch, [
-        _fila_guillermar("ATAMEL", "L1", 100),
-        _fila_guillermar("LORATADINA", "L2", 100),
+        _fila_insuaminca_factura("ATAMEL", "L1", 100),
+        _fila_insuaminca_factura("LORATADINA", "L2", 100),
     ])
 
-    resultado = utils._extraer_medicamentos_guillermar(b"%PDF")
+    resultado = utils._extraer_medicamentos_insuaminca_factura(b"%PDF")
 
     assert [m["descripcion"] for m in resultado] == ["ATAMEL", "LORATADINA"]
 
@@ -238,12 +238,12 @@ def test_neto_es_unitario_en_todos_los_formatos(monkeypatch):
     assert insuaminca["Neto USD"] == pytest.approx(4.50)
     assert insuaminca["TOT. NETO USD"] == pytest.approx(13.50)
 
-    # GUILLER MAR: 2 unidades, importe 200,00 Bs / 2,00 US$.
-    _fake_pdfplumber(monkeypatch, [_fila_guillermar("ATAMEL", "L1", 100)])
-    [guillermar] = utils._extraer_medicamentos_guillermar(b"%PDF")
-    assert guillermar["Neto Bs"] == pytest.approx(100.0)
-    assert guillermar["Neto USD"] == pytest.approx(1.0)
-    assert guillermar["TOT. NETO Bs"] == pytest.approx(200.0)
+    # Factura INSUAMINCA: 2 unidades, importe 200,00 Bs / 2,00 US$.
+    _fake_pdfplumber(monkeypatch, [_fila_insuaminca_factura("ATAMEL", "L1", 100)])
+    [factura] = utils._extraer_medicamentos_insuaminca_factura(b"%PDF")
+    assert factura["Neto Bs"] == pytest.approx(100.0)
+    assert factura["Neto USD"] == pytest.approx(1.0)
+    assert factura["TOT. NETO Bs"] == pytest.approx(200.0)
 
 
 @pytest.mark.parametrize(
@@ -251,7 +251,8 @@ def test_neto_es_unitario_en_todos_los_formatos(monkeypatch):
     [
         ("Número de Documento: 1", "nena"),
         ("INSUAMINCA, C.A. RIF: J-1\nPedido de cliente", "insuaminca"),
-        ("FACTURA 0001", "guillermar"),
+        ("FACTURA B0485399\nDescripción Lote Vence Cant. D/1 D/2 D/3 D/4 Prec U Prec $", "insuaminca_factura"),
+        ("Un PDF de otra droguería", None),
         (None, None),
     ],
 )
@@ -347,3 +348,24 @@ def test_formularios_del_admin_llevan_token_csrf(cliente, monkeypatch):
     assert sin_credenciales.status_code == 401
     assert con_credenciales.status_code == 200
     assert b"csrf_token" in con_credenciales.data
+
+
+def test_encabezado_factura_insuaminca_unifica_la_drogueria():
+    texto = (
+        "FACTURA B0485399\nFecha de Emisión: 10/09/2026\n"
+        "Descripción Lote Vence Cant. D/1 D/2 D/3 D/4 Prec U Prec $ Imp Bs Imp $ IVA%\n"
+        "INSUAMINCA Unidades: 31 Tasa BCV\nSICM 50863 Bultos: 1 827,74\n"
+    )
+
+    encabezado = parsear_encabezado_factura(texto)
+
+    assert encabezado == {
+        "numero_factura": "B0485399",
+        "fecha": "10/09/2026",
+        "tipo_de_cambio": "827.74",
+        "drogueria": "INSUAMINCA, C.A.",
+    }
+
+
+def test_formato_desconocido_no_extrae_items():
+    assert utils.extraer_informacion_medicamentos("Un PDF de otra droguería", b"%PDF") == []

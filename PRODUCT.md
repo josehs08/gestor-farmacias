@@ -28,8 +28,8 @@ Automates extraction from a specific fixed-column supplier invoice PDF layout di
 ## Capabilities and Constraints
 
 - Venezuela's bolívar/USD dual-currency pricing is a permanent product constraint, not incidental — invoice and inventory data always carries both Bs and USD figures, and the exchange-rate lookup is pinned to the Venezuelan dolarapi.com endpoint.
-- The invoice parser (`extraer_informacion_medicamentos`) supports three supplier layouts (Nena, INSUAMINCA, GUILLER MAR); each new supplier needs its own extractor and, for pricing, its own rule in `src/front/lib/precioFactura.js`.
-- Sale-price rules come from the pharmacy's spreadsheets: list price + 30 % markup (default) + IVA 16 % unless exempt, with the distributor discounts optionally passed on to the customer. GUILLER MAR has no confirmed rule yet.
+- The pharmacy is FARMACIA GUILLER MAR C.A. The invoice parser (`extraer_informacion_medicamentos`) supports its two suppliers' layouts: Nena's invoice and INSUAMINCA's order and invoice. Each new supplier needs its own extractor and, for pricing, its own rule in `src/front/lib/precioFactura.js`.
+- Sale-price rules come from the pharmacy's spreadsheets: list price + 30 % markup (default) + IVA 16 % unless exempt, with the distributor discounts optionally passed on to the customer. Both rules were checked against real invoices and the spreadsheets.
 - Only the `/admin` panel is password-protected; the rest of the API assumes trusted internal use by pharmacy staff.
 
 ## Brand Commitments

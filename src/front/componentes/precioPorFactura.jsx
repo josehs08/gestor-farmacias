@@ -147,9 +147,10 @@ const PrecioPorFactura = () => {
               {facturaSeleccionada?.drogueria || "Droguería sin identificar"} — Venta = precio de
               lista + % de ganancia + IVA; &ldquo;con descuento&rdquo; le traslada al cliente los
               descuentos del distribuidor
-              {facturaSeleccionada?.formato === "insuaminca" && " (el Seg queda para la farmacia)"}
-              {!["nena", "insuaminca"].includes(facturaSeleccionada?.formato) &&
-                ". Este formato todavía no tiene regla confirmada: el precio se toma tal cual"}
+              {["insuaminca", "insuaminca_factura"].includes(facturaSeleccionada?.formato) &&
+                " (el Seg queda para la farmacia)"}
+              {!["nena", "insuaminca", "insuaminca_factura"].includes(facturaSeleccionada?.formato) &&
+                ". El lector no reconoce este formato: el precio se toma tal cual"}
               .
             </DialogDescription>
           </DialogHeader>

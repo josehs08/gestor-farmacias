@@ -46,13 +46,13 @@ A standalone, hosted version of the tool published as a claude.ai Artifact (http
 Everything backend-side lives in `app.py` — models, routes, and Flask-Admin registration are not split into blueprints/modules. SQLite database file is `instance/database.db` (auto-created via `db.create_all()` on import).
 
 Three models (`db.create_all()` does not alter existing tables — a column type change on Postgres needs a manual `ALTER TABLE`):
-- `Recipe` — an uploaded invoice: stores the raw PDF bytes (`file`), the full extracted text (`texto`), and a few fields parsed out of the first page (`numero_factura`, `fecha`, `tipo_de_cambio`, `drogueria`). `serialize()` adds a computed `formato` (`nena` | `insuaminca` | `guillermar`, from `detectar_formato(texto)`) that selects the frontend pricing rule.
+- `Recipe` — an uploaded invoice: stores the raw PDF bytes (`file`), the full extracted text (`texto`), and a few fields parsed out of the first page (`numero_factura`, `fecha`, `tipo_de_cambio`, `drogueria`). `serialize()` adds a computed `formato` (`nena` | `insuaminca` | `insuaminca_factura` | null, from `detectar_formato(texto)`) that selects the frontend pricing rule. INSUAMINCA issues two documents per purchase: the order ("Pedido de cliente", USD only) and the invoice ("FACTURA B…", Bs + USD with its Tasa BCV). FARMACIA GUILLER MAR, printed on both, is the pharmacy itself (the client), not a supplier.
 - `Medicina` — one line item (medicine) parsed out of an invoice, with quantity/price/tax breakdown columns (`ALIC` = IVA %, `DC`/`DD`/`DL`/`DV` = discount percentages as floats, `Neto_*` = net **per unit**, `TOT_NETO_*` = line total).
 - `Factura` — a minimal invoice/exchange-rate record (`numero`, `fecha`, `precio_dolar`); not currently wired to any route.
 
 Flow for ingesting an invoice:
 1. `POST /factura` (or `POST /facturaurl`, SSRF-checked by `validar_url_publica`) — upload a PDF (max 20 MB, must start with `%PDF`); `extraer_datos_factura_pdf` (pypdf) parses the header from the first page per supplier format and stores the full text and raw file in a new `Recipe`. Duplicates (same number + droguería, or same bytes) get 409.
-2. `POST /medicina/<idFactura>` — `extraer_informacion_medicamentos` dispatches on `detectar_formato`: Nena ("Número de Documento") uses a regex over the text; INSUAMINCA ("Pedido de cliente") and GUILLER MAR read word coordinates with pdfplumber. Each item becomes a `Medicina` row.
+2. `POST /medicina/<idFactura>` — `extraer_informacion_medicamentos` dispatches on `detectar_formato`: Nena ("Número de Documento") uses a regex over the text; the INSUAMINCA order and invoice read word coordinates with pdfplumber; an unknown layout yields no items (422). Each item becomes a `Medicina` row.
 3. `GET /precio/<nombre>` — case-insensitive substring search over `Medicina.descripcion` (LIKE wildcards escaped), newest invoice first, each result with its `factura`; the frontend computes the sale price with the same rule as "Precio por factura".
 
 Excel import/export:
