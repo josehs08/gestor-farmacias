@@ -1,0 +1,191 @@
+<title>Gestor de Farmacias</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap">
+<style>
+  /* Layout: mesa de trabajo con tickets de papel térmico; barra superior con
+     las tres secciones, cada sección es un ticket con borde dentado. */
+  :root {
+    --mesa: hsl(48 12% 83%);
+    --tinta: hsl(0 0% 10%);
+    --papel: hsl(50 21% 95%);
+    --papel-2: hsl(47 17% 90%);
+    --tenue: hsl(53 5% 31%);
+    --linea: hsl(46 8% 70%);
+    --azul: hsl(220 76% 48%);
+    --azul-tinta: hsl(50 21% 97%);
+    --resalte: hsl(221 79% 92%);
+    --resalte-tinta: hsl(220 78% 32%);
+    --rojo: hsl(7 74% 45%);
+    --verde: hsl(152 52% 30%);
+    --sombra: rgba(26, 26, 26, 0.35);
+    --f-cuerpo: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --f-dato: "Azeret Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --borde-ticket: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 8' preserveAspectRatio='none'%3E%3Cpolygon fill='%23fff' points='0,4 4,0 8,4 12,0 16,4 16,8 0,8'/%3E%3C/svg%3E");
+    --borde-ticket-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 8' preserveAspectRatio='none'%3E%3Cpolygon fill='%23fff' points='0,4 4,8 8,4 12,8 16,4 16,0 0,0'/%3E%3C/svg%3E");
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --mesa: hsl(60 4% 11%); --tinta: hsl(52 17% 91%); --papel: hsl(45 5% 16%); --papel-2: hsl(45 6% 13%);
+      --tenue: hsl(46 6% 62%); --linea: hsl(53 7% 26%); --azul: hsl(221 100% 68%); --azul-tinta: hsl(60 4% 11%);
+      --resalte: hsl(223 43% 24%); --resalte-tinta: hsl(222 100% 87%); --rojo: hsl(8 85% 63%); --verde: hsl(152 45% 55%);
+      --sombra: rgba(0, 0, 0, 0.6); color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --mesa: hsl(60 4% 11%); --tinta: hsl(52 17% 91%); --papel: hsl(45 5% 16%); --papel-2: hsl(45 6% 13%);
+    --tenue: hsl(46 6% 62%); --linea: hsl(53 7% 26%); --azul: hsl(221 100% 68%); --azul-tinta: hsl(60 4% 11%);
+    --resalte: hsl(223 43% 24%); --resalte-tinta: hsl(222 100% 87%); --rojo: hsl(8 85% 63%); --verde: hsl(152 45% 55%);
+    --sombra: rgba(0, 0, 0, 0.6); color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--mesa); color: var(--tinta); font-family: var(--f-cuerpo); font-size: 15px;
+    line-height: 1.5; padding-inline: 16px; padding-block: 0 48px; font-variant-numeric: tabular-nums;
+  }
+  ::selection { background: var(--azul); color: var(--azul-tinta); }
+  :focus-visible { outline: 2px solid var(--azul); outline-offset: 2px; }
+  h1, h2, h3 { text-wrap: balance; margin: 0; }
+  button, input, select { font: inherit; color: inherit; }
+
+  .dato, .etiqueta, th { font-family: var(--f-dato); }
+  .etiqueta { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--tenue); font-weight: 600; }
+  .tenue { color: var(--tenue); }
+
+  /* Barra superior */
+  .barra {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--mesa);
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding-block: 14px;
+    border-bottom: 1px dashed var(--linea); margin-bottom: 24px; max-width: 1240px; margin-inline: auto;
+  }
+  .marca { display: flex; align-items: center; gap: 10px; font-family: var(--f-dato); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; font-size: 0.9rem; }
+  .marca svg { flex: none; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  nav a {
+    font-family: var(--f-dato); font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+    padding: 8px 12px; color: var(--tinta); text-decoration: none; border: 1px solid transparent;
+  }
+  nav a:hover { border-color: var(--linea); }
+  nav a[aria-current="page"] { background: var(--azul); color: var(--azul-tinta); }
+  .barra-der { margin-left: auto; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .chip { font-family: var(--f-dato); font-size: 0.72rem; padding: 4px 8px; border: 1px dashed var(--linea); white-space: nowrap; }
+  .chip b { font-weight: 700; }
+
+  main { max-width: 1240px; margin-inline: auto; display: grid; gap: 24px; }
+
+  /* Ticket */
+  .ticket {
+    background: var(--papel); box-shadow: 0 14px 30px -18px var(--sombra); min-width: 0;
+    padding: 28px clamp(16px, 3vw, 28px);
+    -webkit-mask-image: var(--borde-ticket), linear-gradient(#000, #000), var(--borde-ticket-b);
+    -webkit-mask-repeat: repeat-x, no-repeat, repeat-x;
+    -webkit-mask-position: top left, left 8px, bottom left;
+    -webkit-mask-size: 16px 8px, 100% calc(100% - 16px), 16px 8px;
+    mask-image: var(--borde-ticket), linear-gradient(#000, #000), var(--borde-ticket-b);
+    mask-repeat: repeat-x, no-repeat, repeat-x;
+    mask-position: top left, left 8px, bottom left;
+    mask-size: 16px 8px, 100% calc(100% - 16px), 16px 8px;
+  }
+  .ticket-cab { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; padding-bottom: 14px; border-bottom: 1px dashed var(--linea); margin-bottom: 16px; }
+  .ticket-cab h2 { font-family: var(--f-dato); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  .ticket-pie { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; border-top: 1px dashed var(--linea); padding-top: 12px; margin-top: 4px; }
+
+  .dos-col { display: grid; gap: 24px; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 980px) { .dos-col { grid-template-columns: minmax(0, 4fr) minmax(0, 7fr); align-items: start; } }
+  #detalle { scroll-margin-top: 84px; min-width: 0; }
+  @media (max-width: 700px) {
+    .barra { position: static; }
+    .barra-der { margin-left: 0; }
+    #detalle { scroll-margin-top: 8px; }
+  }
+
+  /* Botones y campos */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--tinta); background: transparent;
+    padding: 7px 12px; cursor: pointer; font-family: var(--f-dato); font-size: 0.74rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; text-decoration: none; color: var(--tinta);
+  }
+  .btn:hover { background: var(--papel-2); }
+  .btn.primario { background: var(--azul); border-color: var(--azul); color: var(--azul-tinta); }
+  .btn.primario:hover { filter: brightness(1.08); }
+  .btn.peligro { border-color: var(--rojo); color: var(--rojo); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .acciones { display: flex; flex-wrap: wrap; gap: 8px; }
+  .campo { display: grid; gap: 4px; min-width: 0; }
+  .campo input, .campo select, .buscar {
+    border: 1px solid var(--linea); background: var(--papel); padding: 8px 10px; width: 100%; min-width: 0; caret-color: var(--azul);
+  }
+  .rejilla-campos { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+
+  /* Zona de carga */
+  .soltar {
+    display: grid; place-items: center; gap: 6px; text-align: center; padding: 28px 16px; cursor: pointer;
+    border: 1.5px dashed var(--linea); background: var(--papel-2);
+  }
+  .soltar.encima { border-color: var(--azul); background: var(--resalte); }
+  .soltar strong { font-size: 1rem; }
+  .soltar input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+  /* Tablas */
+  .tabla-env { overflow-x: auto; min-width: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+  th { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--tenue); text-align: left; font-weight: 600; padding: 8px 10px; border-bottom: 1px dashed var(--linea); white-space: nowrap; }
+  td { padding: 9px 10px; border-bottom: 1px dashed var(--linea); vertical-align: top; }
+  td.num, th.num { text-align: right; font-family: var(--f-dato); white-space: nowrap; }
+  th.venta, td.venta { background: var(--resalte); color: var(--resalte-tinta); }
+  td.venta { font-weight: 600; }
+  tfoot td { font-family: var(--f-dato); font-weight: 700; border-bottom: none; }
+  tbody tr.clic { cursor: pointer; }
+  tbody tr.clic:hover td { background: var(--papel-2); }
+  tbody tr.clic:hover td.venta { background: var(--resalte); }
+  tbody tr[aria-selected="true"] td { background: var(--papel-2); box-shadow: inset 0 0 0 0 var(--azul); }
+  tbody tr[aria-selected="true"] td:first-child { box-shadow: inset 3px 0 0 var(--azul); }
+
+  .estado { text-align: center; padding: 32px 12px; font-family: var(--f-dato); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--tenue); }
+  .aviso { padding: 10px 12px; border: 1px dashed var(--linea); font-size: 0.88rem; }
+  .aviso.error { border-color: var(--rojo); color: var(--rojo); }
+  .aviso.ok { border-color: var(--verde); color: var(--verde); }
+  .pill { display: inline-block; font-family: var(--f-dato); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 6px; border: 1px solid var(--linea); }
+  .filtros { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .filtros button { border: 1px solid var(--linea); background: transparent; padding: 4px 9px; font-family: var(--f-dato); font-size: 0.7rem; cursor: pointer; }
+  .filtros button[aria-pressed="true"] { background: var(--tinta); color: var(--papel); border-color: var(--tinta); }
+
+  .bloqueo { max-width: 560px; margin: 8vh auto 0; text-align: center; display: grid; gap: 12px; }
+  .bloqueo h1 { font-family: var(--f-dato); font-size: 1.1rem; text-transform: uppercase; letter-spacing: 0.06em; }
+  .lista-def { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; }
+  .lista-def dt { font-family: var(--f-dato); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--tenue); padding-top: 2px; }
+  .lista-def dd { margin: 0; }
+  .pasos { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .imprimir tbody tr { animation: imprimir 320ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .imprimir tbody tr:nth-child(2) { animation-delay: 30ms; } .imprimir tbody tr:nth-child(3) { animation-delay: 60ms; }
+    .imprimir tbody tr:nth-child(4) { animation-delay: 90ms; } .imprimir tbody tr:nth-child(n+5) { animation-delay: 120ms; }
+  }
+  @keyframes imprimir { from { opacity: 0.2; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+</style>
+
+<header class="barra">
+  <div class="marca">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="2" width="18" height="20" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 7v10M7 12h10" stroke="currentColor" stroke-width="2.2"/></svg>
+    Gestor de Farmacias
+  </div>
+  <nav id="nav" aria-label="Secciones">
+    <a href="#facturas" data-ruta="facturas">Facturas</a>
+    <a href="#precios" data-ruta="precios">Precios</a>
+    <a href="#ajustes" data-ruta="ajustes">Ajustes</a>
+  </nav>
+  <div class="barra-der">
+    <span class="chip" id="chip-tasa">Tasa del día <b>—</b></span>
+    <span class="chip" id="chip-usuario">Conectando…</span>
+  </div>
+</header>
+
+<main id="app">
+  <section class="ticket">
+    <div class="estado">Abriendo la base de datos de la farmacia…</div>
+  </section>
+</main>
+
+<script type="module" src="app.js"></script>

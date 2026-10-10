@@ -31,6 +31,14 @@ pytest              # backend tests in tests/
 ```
 Environment variables (`.env`, never committed): `VITE_APP_API_URL`, `FLASK_KEY`, `DATABASE_URL`, `CORS_ORIGINS`, `ADMIN_USER`/`ADMIN_PASSWORD` (the `/admin` panel is denied unless `ADMIN_PASSWORD` is set).
 
+## Artifact (`artifact/`)
+
+A standalone, hosted version of the tool published as a claude.ai Artifact (https://claude.ai/artifact/6V17Vm3vPFKw6S5ConMhZG). It does not use the Flask backend:
+- `index.html` (page markup + styles, "ticket fiscal" tokens), `app.js` (UI), `parsers.js` (pure-JS port of the `src/back/utils.py` extractors over pdf.js text/word positions; tests in `parsers.test.js`, run by `npm test`). `precioFactura.js` is published straight from `src/front/lib/`, so pricing rules stay single-sourced.
+- Data: one `facturas/<droguería>--<número>` document per invoice with its items embedded (the artifact db caps at 25,000 docs); `config/general` holds the shared exchange rate and markup. PDFs go to the artifact's asset store.
+- Security: the artifact is private; db rules let only Contributors/Editors read or write (`config` only Editors), Viewers see nothing.
+- To republish, publish `artifact/index.html` with files `app.js`, `parsers.js` and `precioFactura.js` (from `src/front/lib/precioFactura.js`) to the URL above, keeping the declared capabilities.
+
 ## Architecture
 
 ### Backend (`app.py` + `src/back/utils.py`)
